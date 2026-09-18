@@ -1,0 +1,89 @@
+# 多内核版本适配性冒烟——TCG 形态。跟 kernel-compat-smoke.toml 逐字段
+# 一致，只有 execution_class/performance_valid 两个字段不同（TCG 下吞吐/
+# RTT/CPU 等一切数字只作诊断，不得写成算法收益结论——本身就不做性能
+# 结论，这条约束跟这份 manifest 天然一致）。用于资源不足以起嵌套 KVM、
+# 只能用 TCG 加速器跑冒烟的环境，见 infra/kernel/run-compat-pipeline.sh
+# 的 `--accel tcg`。
+name = "kernel-compat-smoke-tcg"
+execution_class = "tcg-validation"
+performance_valid = false
+seed = 20260806
+warmup_s = 3
+duration_s = 8
+runs = 1
+stock_qdisc = "fq_codel"
+server_ssh = "skyline@127.0.0.1:2222"
+client_ssh = "skyline@127.0.0.1:2223"
+server_data_ip = "10.20.1.2"
+server_data_ip6 = "fd20:1::2"
+server_data_interface = "data0"
+
+[[profiles]]
+id = "compat-cubic-marked"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 10
+
+[profiles.rack_rto]
+enabled = true
+srtt_permille = 1000
+floor_us = 150000
+ceiling_us = 200000
+warmup_samples = 2
+rto_max_normal_permille = 0
+rto_max_congested_permille = 0
+rto_max_congestion_ratio_permille = 0
+
+[[profiles]]
+id = "compat-skyline-full"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+guardrail_gain = 0.8
+loss_inflation_max_ratio = 0.5
+
+[[scenarios]]
+id = "compat-smoke-v4"
+rtt_ms = 100
+rate_mbit = 50
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 5.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+capture_retransmits = true
+address_family = "v4"
+
+[[scenarios]]
+id = "compat-smoke-v6"
+rtt_ms = 100
+rate_mbit = 50
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 5.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+capture_retransmits = true
+address_family = "v6"

@@ -1,0 +1,73 @@
+# 重传包 DSCP 标记——中性性/开销对比。跟
+# retransmit-dscp-mechanism.toml 是同一需求的另一半：那份验证"标记对不
+# 对"，这份验证"打开标记会不会拖累吞吐/CPU"。
+#
+# A/B 只有一个变量：retransmit_dscp.enabled（b1-controlled-cubic 完全一
+# 致，其它字段不动）。两个场景：
+#   - retransmit-neutrality-baseline：中等丢包，标准时长/样本数（不是机
+#     制验证的短样本），标准中性性对比。
+#   - retransmit-neutrality-highloss：更高丢包率——`bpf_skb_store_bytes`
+#     触发的 skb_ensure_writable/pskb_expand_head 只发生在真正被标记的
+#     包上，低丢包场景测不出这份成本，需要专门覆盖一次高丢包场景确认没
+#     有意外开销回归。
+#
+# 抓包在这份 manifest 里全程关闭（capture_retransmits 默认 false）——
+# tcpdump 在发送端消耗真实 CPU，会直接污染这里要对比的
+# mean_sender_cpu_pct/perf stat 计数器，机制正确性已经在
+# retransmit-dscp-mechanism.toml 里验证过，这里只看性能。
+name = "retransmit-dscp-neutrality"
+execution_class = "formal-kvm"
+performance_valid = true
+seed = 20260808
+warmup_s = 15
+duration_s = 30
+runs = 3
+stock_qdisc = "fq_codel"
+server_ssh = "skyline@127.0.0.1:2222"
+client_ssh = "skyline@127.0.0.1:2223"
+server_data_ip = "10.20.1.2"
+server_data_interface = "data0"
+
+[[profiles]]
+id = "b1-dscp-on"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 10
+
+[[profiles]]
+id = "b1-dscp-off"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = false
+dscp_value = 0
+
+[[scenarios]]
+id = "retransmit-neutrality-baseline"
+rtt_ms = 100
+rate_mbit = 100
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 2.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+
+[[scenarios]]
+id = "retransmit-neutrality-highloss"
+rtt_ms = 100
+rate_mbit = 50
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 15.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"

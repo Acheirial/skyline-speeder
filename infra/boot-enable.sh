@@ -1,0 +1,46 @@
+#!/bin/sh
+# Boot-time activation for Skyline Speeder.
+#
+# skyline-speederd.service only keeps the daemon resident: it deliberately does NOT
+# attach the skyline_cc struct_ops, because attaching is an explicit operator
+# action (see docs/01-deployment-guide.md section 7). Without this step a reboot
+# comes back with the daemon running and every new flow on `fallback_cc` -- a
+# silent regression, since nothing reports an error.
+#
+# `ssctl enable` owns both halves of activation: it attaches the struct_ops and
+# then switches net.ipv4.tcp_congestion_control to skyline_cc itself. This script
+# therefore does NOT write that sysctl -- two places writing the same setting is
+# how they drift apart. The one sysctl left here is the qdisc, which ssctl has no
+# business touching.
+#
+# skyline-speederd.service has no systemd readiness notification, so the control
+# socket may not exist yet when this runs; wait for it rather than racing it.
+set -eu
+
+SOCKET=${SKYLINE_SOCKET:-/run/skyline-speeder/speeder.sock}
+TIMEOUT=${SKYLINE_SOCKET_TIMEOUT:-60}
+DEADLINE=$(( $(date +%s) + TIMEOUT ))
+
+while [ ! -S "$SOCKET" ]; do
+    if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+        echo "timed out after ${TIMEOUT}s waiting for $SOCKET" >&2
+        exit 1
+    fi
+    sleep 1
+done
+
+modprobe sch_fq 2>/dev/null || true
+sysctl -qw net.core.default_qdisc=fq
+
+/usr/local/bin/ssctl enable >/dev/null
+
+# Read the sysctl back rather than trusting the exit status: this is the line
+# that would catch `ssctl enable` succeeding while the default silently stayed
+# where it was.
+ACTIVE=$(sysctl -n net.ipv4.tcp_congestion_control)
+if [ "$ACTIVE" != skyline_cc ]; then
+    echo "ssctl enable returned success but the default congestion control is '$ACTIVE'" >&2
+    exit 1
+fi
+
+echo "Skyline Speeder enabled: cc=$ACTIVE qdisc=$(sysctl -n net.core.default_qdisc)"

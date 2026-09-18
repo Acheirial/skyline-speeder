@@ -1,0 +1,131 @@
+# 带宽敏感性——4 profile（b0-stock-cubic/b1-controlled-cubic/bbr-fq/
+# skyline-best，skyline-best 同 target-box.toml 带 rack_rto+guardrail_gain）×
+# rtt200-loss15 下 rate_mbit ∈ {10,20,30,60,100} × runs=2 = 40 case，
+# ~40 分钟。低带宽端点（10/20 Mbit）覆盖 initial_cwnd_packets=100 可能
+# 直接超过 BDP 的边界——IW 与护栏交互的一个现实约束。
+#
+# 不设通过/不通过的数值门槛，只要求诚实报告 4 个 profile 在 5 个带宽点上的
+# 趋势——"数百 Mbps"仍是外推，这里也只覆盖到 100Mbit（offload=off 测试台
+# 结构性上限）。
+name = "bandwidth-sweep"
+execution_class = "formal-kvm"
+performance_valid = true
+seed = 20260808
+warmup_s = 15
+duration_s = 30
+runs = 2
+stock_qdisc = "fq_codel"
+server_ssh = "skyline@127.0.0.1:2222"
+client_ssh = "skyline@127.0.0.1:2223"
+server_data_ip = "10.20.1.2"
+server_data_interface = "data0"
+
+[[profiles]]
+id = "b0-stock-cubic"
+kind = "stock-cubic"
+cc = "cubic"
+modules = []
+
+[[profiles]]
+id = "b1-controlled-cubic"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[[profiles]]
+id = "bbr-fq"
+kind = "bbr"
+cc = "bbr"
+modules = []
+
+[[profiles]]
+id = "skyline-best"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+guardrail_gain = 0.8
+loss_inflation_max_ratio = 0.5
+
+[profiles.rack_rto]
+enabled = true
+srtt_permille = 1100
+floor_us = 20000
+ceiling_us = 200000
+warmup_samples = 4
+rto_max_normal_permille = 3000
+rto_max_congested_permille = 6000
+rto_max_congestion_ratio_permille = 0
+
+[[scenarios]]
+id = "rtt200-loss15-bw10"
+rtt_ms = 200
+rate_mbit = 10
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 15.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+
+[[scenarios]]
+id = "rtt200-loss15-bw20"
+rtt_ms = 200
+rate_mbit = 20
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 15.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+
+[[scenarios]]
+id = "rtt200-loss15-bw30"
+rtt_ms = 200
+rate_mbit = 30
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 15.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+
+[[scenarios]]
+id = "rtt200-loss15-bw60"
+rtt_ms = 200
+rate_mbit = 60
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 15.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+
+[[scenarios]]
+id = "rtt200-loss15-bw100"
+rtt_ms = 200
+rate_mbit = 100
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 15.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"

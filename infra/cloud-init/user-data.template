@@ -1,0 +1,36 @@
+#cloud-config
+users:
+  - default
+  - name: skyline
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - __SSH_PUBLIC_KEY__
+package_update: true
+packages:
+  - clang
+  - ethtool
+  - iperf3
+  - iputils-ping
+  - iproute2
+  - jq
+  - linux-tools-common
+  - linux-tools-generic
+  - llvm
+  - make
+  - pkg-config
+  - cargo
+  - rustc
+  - libelf-dev
+  - libbpf-dev
+  - zlib1g-dev
+  # research/experiments/run_matrix.py's retransmit-DSCP capture (see
+  # analyze_results.py's retransmit_capture_precision/
+  # retransmit_capture_client_arrivals) spawns tcpdump on both guests.
+  # Declared here so a freshly-built image has it pinned rather than
+  # incidentally present from the base cloud image -- see also
+  # infra/install-guest.sh's idempotent install for beds built before this.
+  - tcpdump
+runcmd:
+  - [sysctl, -w, net.ipv4.tcp_sack=1]

@@ -1,0 +1,62 @@
+# 最小正确性冒烟——不看性能。见 bpf/include/skyline_abi.h 顶部注释：
+# M2 是STARTUP/CRUISE两态状态机，开启时直接掌管全部CA状态下的cwnd
+# （绕开PRR），ssthresh对M2永不降窗，M3是单一丢包率补偿系数。
+#
+# 验收点（跑完后人工核对，不在这个manifest里断言）：
+# - ssctl status 显示当前 abi_version 与系数字段（cruise_inflight_gain等）
+# - skyline-events.jsonl 里 SKYLINE_EVENT_STATE 的 state 只出现 0/1（STARTUP/CRUISE）
+# - metrics.prr_adjustments == 0（证明 M2 路径确实绕开了 PRR）
+# - metrics.guardrail_hits 不是每轮都触发
+#
+# rtt200-loss15（目标box中心点）× {b1, skyline-best} × runs=1，2 case，~10分钟。
+name = "smoke"
+execution_class = "formal-kvm"
+performance_valid = true
+seed = 20261210
+warmup_s = 15
+duration_s = 30
+runs = 1
+stock_qdisc = "fq_codel"
+server_ssh = "skyline@127.0.0.1:2222"
+client_ssh = "skyline@127.0.0.1:2223"
+server_data_ip = "10.20.1.2"
+server_data_interface = "data0"
+
+[[profiles]]
+id = "b1-controlled-cubic"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[[profiles]]
+id = "skyline-best"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.5
+cruise_pacing_gain = 1.25
+loss_inflation_max_ratio = 0.5
+
+[[scenarios]]
+id = "rtt200-loss15"
+rtt_ms = 200
+rate_mbit = 100
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 15.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"

@@ -1,0 +1,14 @@
+[package]
+name = "skyline-speederd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytemuck.workspace = true
+clap.workspace = true
+libbpf-rs.workspace = true
+serde_json.workspace = true
+signal-hook.workspace = true
+skyline-common = { path = "../skyline-common" }

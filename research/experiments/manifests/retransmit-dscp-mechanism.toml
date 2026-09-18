@@ -1,0 +1,180 @@
+# 重传包 DSCP 标记——机制验证（网络侧按 DSCP 走不同 upstream，Skyline Speeder 这一侧
+# 只负责正确、可配置地把"这是重传包"这件事标在 IP 头上；网络侧是否真的
+# 按 DSCP 分流不在这次测试范围内）。
+#
+# 检测机制在 bpf/skyline_tc.bpf.c 内自成一体完成（比较包自己的 TCP end_seq 和
+# bpf_tcp_sock(sk)->snd_nxt），接口级挂载、不分 cgroup、不看跑的是哪种拥
+# 塞控制——这份 manifest 的核心验证点就是"标记机制对 b0/b1/bbr/skyline 四种
+# CC 一致生效"，不是又一轮 CC 性能对比，所以 runs=1（跟
+# rto-max-smoke.toml 一样，是机制冒烟验证，不追求统计置信）。
+#
+# 四组 case：
+#   (a) 机制验证：4 个 profile 在同一个真实丢包场景下开启标记，抓包核对
+#       标记的都是真重传（sender 侧抓包精度门槛）+ BPF 自带计数器（主
+#       oracle）。
+#   (b) 零丢包负控制：同一批 profile 换到 netem 0% 丢包场景，开着标记。
+#       实测这里的"标记数"**不是** 0——HTB 限速器（queue_bdp=1.0，浅队列）
+#       在可达吞吐超过 rate_mbit 时会尾部丢包，这是跟 netem 独立的另一个
+#       真实丢包源，一样会触发真实重传。这个场景测的不是"零重传"，而是
+#       "在没有 netem 主动丢包时，精度门槛（sender 侧抓包重建）依然
+#       false_positives=0"——反而是比预想更硬的负控制：真实重传量比预期
+#       大得多的情况下，标记逻辑仍然没有误标。
+#   (c) 功能关闭对照：跟 (a) 相同丢包场景，只有 retransmit_dscp.enabled
+#       换成 false——证明开关真的在控制行为（用 BPF 自带计数器跨 case 比
+#       对 (a) 和 (c)：(a) 里 retransmits_detected/marked 都非零，(c) 里
+#       两者都应该是 0——检测发生在 config map 查询之后，disabled 时提前
+#       返回，不解析包）。
+#   (d) DSCP 数值跟踪对照：同一丢包场景，两个不同的 dscp_value（10 和
+#       46）——证明"占位参数"真的是可配置的，不是看起来能配但其实硬编码。
+#
+# 全部四组共用同一个丢包场景（rtt_ms=100/rate_mbit=50/loss_pct=5%，
+# offload=off 保证逐包独立随机丢包、抓包不被 GSO 超帧干扰），只有 (b) 换
+# 成零丢包场景。
+#
+# 已知的口径差异（不是标记错误）：analyze_results.py 里 retransmit_marked
+# （BPF 侧，按 skb 计数一次）和 retransmit_capture_marked（发送端抓包，按
+# wire 上的实际包计数）在高吞吐 case（尤其 skyline-best）下不相等，前者明显偏
+# 小。即使 offload=off 且确认 tso/gso/gro 全部关闭，tc_stats.gso_packets
+# 仍有非零 delta；抓包里的包长度全部是 MTU（1500B，没有真实超帧），说明
+# skb->gso_segs>1 反映的更可能是 TCP 自己的 MSS 计数簿记，不是"这个 skb
+# 真的会在 wire 上再拆分"——但这意味着 BPF 按 skb 计一次的地方，wire 上
+# 可能对应不止一个包，retransmit_marked 因此系统性小于
+# retransmit_capture_marked。**retransmit_capture_marked 才是标记正确性
+# 的权威依据**（发送端抓包直接看 wire，不受这个口径问题影响）；这五组
+# case 里 false_positives 全部是 0，标记机制本身没有问题。gso_packets 这
+# 个计数器在这个环境下是否测的是别的东西是一个更大范围、跟这次 DSCP 功能
+# 无关的独立问题，见 docs/04-performance-report.md 第 9 节。
+name = "retransmit-dscp-mechanism"
+execution_class = "formal-kvm"
+performance_valid = true
+seed = 20260807
+warmup_s = 3
+duration_s = 8
+runs = 1
+stock_qdisc = "fq_codel"
+server_ssh = "skyline@127.0.0.1:2222"
+client_ssh = "skyline@127.0.0.1:2223"
+server_data_ip = "10.20.1.2"
+server_data_interface = "data0"
+
+[[profiles]]
+id = "b0-stock-cubic"
+kind = "stock-cubic"
+cc = "cubic"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 10
+
+[[profiles]]
+id = "b1-controlled-cubic"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 10
+
+[[profiles]]
+id = "bbr-fq"
+kind = "bbr"
+cc = "bbr"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 10
+
+[[profiles]]
+id = "skyline-best"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+guardrail_gain = 0.8
+loss_inflation_max_ratio = 0.5
+
+[profiles.rack_rto]
+enabled = true
+srtt_permille = 1100
+floor_us = 20000
+ceiling_us = 200000
+warmup_samples = 4
+rto_max_normal_permille = 3000
+rto_max_congested_permille = 6000
+rto_max_congestion_ratio_permille = 0
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 10
+
+# 用于 (c)：功能关闭对照。跟 bbr-fq 完全一致，只有 retransmit_dscp.enabled
+# 换成 false。不需要对全部 4 个 CC 都重复关闭对照——检测逻辑完全在
+# skyline_tc.bpf.c 里，跟哪种 CC 在跑无关，(a) 已经证明了"对 4 种 CC 一致生
+# 效"，这里只需要证明一次"关掉开关确实不再标记"。
+[[profiles]]
+id = "bbr-fq-dscp-off"
+kind = "bbr"
+cc = "bbr"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = false
+dscp_value = 0
+
+# 用于 (d)：DSCP 数值跟踪对照的第二个取值（跟上面 bbr-fq 的 dscp_value=10
+# 对比）。
+[[profiles]]
+id = "bbr-fq-dscp46"
+kind = "bbr"
+cc = "bbr"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 46
+
+# (a)(c)(d) 共用：中等丢包，offload=off 保证逐包独立随机丢包+抓包不被
+# GSO 超帧干扰，warmup/duration 短——机制验证不是统计实验。
+[[scenarios]]
+id = "retransmit-mechanism"
+rtt_ms = 100
+rate_mbit = 50
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 5.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+capture_retransmits = true
+
+# (b)：零丢包（netem 层面）负控制——见上方 header 注释，HTB 尾部丢包仍会
+# 产生真实重传，这个场景验证的是"精度门槛在非 netem 丢包源下依然成立"。
+[[scenarios]]
+id = "retransmit-zero-loss"
+rtt_ms = 20
+rate_mbit = 100
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 0.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+capture_retransmits = true

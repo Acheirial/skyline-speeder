@@ -1,0 +1,123 @@
+# RTO 上限机制专项验证。bpf/skyline_policy.bpf.c 的 SKYLINE_RTO_MAX_FLOOR_MS=1000
+# （毫秒）会把 base_rtt<=~167ms 时算出来的 ceiling 一律钳成 1000ms——
+# rto_max_normal_permille(3000=3x) 和 rto_max_congested_permille(6000=6x)
+# 在 rtt_ms<=150 的场景里算出来的目标值本来就不到 1000ms，两档在数值上
+# 完全无法区分，这个机制的核心设计（拥塞证据出现时换更大倍数）需要一个
+# 更高 RTT 的场景才能真正测到。
+#
+# 这里专门设计一个 rtt_ms=300 的强制 RTO 场景：base_rtt≈300ms 时
+# 3x=900ms、6x=1800ms，才能真正分开、不会被 1000ms 下限钳成同一个数。
+# 场景本身沿用 rto-max-smoke.toml 的思路（Gilbert-Elliott 突发丢包 + 低
+# 带宽压小飞行窗口，保证坏状态持续时间稳定超过一整个 RTT，可靠触发真实
+# RTO 超时，而不是被 RACK 提前接管），沿用 smoke 版本已验证过不会失控的
+# burst_length=220/duration_s=20/warmup_s=5，只把 rtt_ms 从 150 改到 300
+# ——更激进的丢包强度参数（更大的 burst_length/duration_s）会让没有
+# rack_rto 上限的 profile（stock cubic/bbr/skyline-rto-baseline）大概率触发
+# 内核默认 rto_max=120s×tcp_retries2=15 档的级联超时死循环，实际卡住的
+# 时间远超测试自身的 wall-clock 预算，因此保持这组更保守的取值。
+#
+# skyline-rto-baseline 跟 skyline-best 完全一致，只是省略 [profiles.rack_rto]——
+# 等价于 M1 tier-2 全程未激活的状态。skyline-best 减 skyline-rto-baseline 的差异
+# 就是这个机制本身的边际效果。
+#
+# 验证重点不是 goodput 好不好看（这个机制本来就是小概率事件才生效，对
+# 整体吞吐影响可能很小），而是机制本身是否按设计运行——检查
+# analyze_results.py 已有的现成列，不需要新代码：
+#   rack_rto_applied>0、rack_rto_max_applied>0（真的被调用且下发成功）；
+#   rack_rto_max_rejected==0（没被内核拒绝）；
+#   rack_rto_max_congested>0（这个场景下确实观测到过"拥塞证据"分支）；
+#   max_rto_ms 明显小于内核 120000ms 默认值，且 skyline-best 与
+#   skyline-rto-baseline 之间有可辨的差异。
+#
+# 4 profile（b1-controlled-cubic/bbr-fq/skyline-rto-baseline/skyline-best）×
+# 1 场景 × runs=3 = 12 case，~15-20 分钟。
+name = "rto-max-validation"
+execution_class = "formal-kvm"
+performance_valid = true
+seed = 20260812
+warmup_s = 5
+duration_s = 20
+runs = 3
+stock_qdisc = "fq_codel"
+server_ssh = "skyline@127.0.0.1:2222"
+client_ssh = "skyline@127.0.0.1:2223"
+server_data_ip = "10.20.1.2"
+server_data_interface = "data0"
+
+[[profiles]]
+id = "b1-controlled-cubic"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[[profiles]]
+id = "bbr-fq"
+kind = "bbr"
+cc = "bbr"
+modules = []
+
+[[profiles]]
+id = "skyline-rto-baseline"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+guardrail_gain = 0.8
+loss_inflation_max_ratio = 0.5
+
+[[profiles]]
+id = "skyline-best"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+guardrail_gain = 0.8
+loss_inflation_max_ratio = 0.5
+
+[profiles.rack_rto]
+enabled = true
+srtt_permille = 1100
+floor_us = 20000
+ceiling_us = 200000
+warmup_samples = 4
+rto_max_normal_permille = 3000
+rto_max_congested_permille = 6000
+rto_max_congestion_ratio_permille = 0
+
+[[scenarios]]
+id = "forced-rto-burst-rtt300"
+rtt_ms = 300
+rate_mbit = 15
+queue_bdp = 1.0
+loss_model = "gemodel"
+loss_pct = 8.0
+loss_direction = "data"
+burst_length = 220
+parallel = 1
+offload = "off"

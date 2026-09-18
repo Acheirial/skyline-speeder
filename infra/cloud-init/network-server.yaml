@@ -1,0 +1,19 @@
+version: 2
+ethernets:
+  mgmt:
+    match:
+      macaddress: "52:54:00:10:00:01"
+    set-name: mgmt0
+    dhcp4: true
+  data:
+    match:
+      macaddress: "52:54:00:20:00:01"
+    set-name: data0
+    # v6 addresses/routes mirror the v4 ones -- see infra/topology.sh's
+    # fd20:1::/64 <-> 10.20.1.0/24 numbering.
+    addresses: [10.20.1.2/24, "fd20:1::2/64"]
+    routes:
+      - to: 10.20.2.0/24
+        via: 10.20.1.1
+      - to: "fd20:2::/64"
+        via: "fd20:1::1"

@@ -1,0 +1,87 @@
+Skyline Speeder
+Copyright (c) 2026 CYBERVERSE LLC
+
+An open source project of CYBERVERSE LLC, sponsored by Skyline Connect.
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License version 2 as published
+by the Free Software Foundation. The complete license text is in LICENSE.
+
+Every source file carries an SPDX-License-Identifier line. Where a file and
+this notice disagree, the file wins.
+
+--------------------------------------------------------------------------
+Why GPL-2.0 and not something more permissive
+--------------------------------------------------------------------------
+
+This is not a preference. It is what the code's dependencies require.
+
+  * bpf/skyline_cc.bpf.c reimplements algorithms from the Linux kernel
+    closely enough that the kernel sources are cited by file and line
+    throughout it, and in places reproduces their constants and control
+    flow exactly. Those reimplementations exist because a cong_control
+    struct_ops program bypasses the kernel's own versions and must supply
+    an equivalent (see section 4 of docs/03-design.md). Work that close to
+    GPL-2.0 originals is very likely derivative of them, and GPL-2.0
+    section 6 forbids imposing further restrictions on recipients.
+
+  * The three BPF objects declare `char LICENSE[] SEC("license") = "GPL"`.
+    None of the helpers they currently call is GPL-only, so that
+    declaration is not what makes them load today, but it is a statement
+    to the kernel about their licensing and it needs to stay true.
+
+--------------------------------------------------------------------------
+Upstream work referenced or reimplemented
+--------------------------------------------------------------------------
+
+No kernel source file is copied verbatim into this repository. Each
+reference is cited inline at the point of use in bpf/skyline_cc.bpf.c.
+
+  net/ipv4/tcp_cubic.c
+      The cubic growth curve, the compute-K-once-per-epoch handling and the
+      TCP-friendliness Reno floor, including the `delta = cwnd * 15 / 8`
+      accumulator the kernel derives from beta_scale at its default beta,
+      and the `cnt = 100 * cwnd` near-freeze when the target has not yet
+      overtaken cwnd. Used by skyline_cubic_target() and the growth path
+      that runs whenever the adaptive-cwnd module is off.
+      TCP CUBIC: Copyright (C) 2007 Sangtae Ha, Injong Rhee
+      and the Linux kernel contributors.
+
+  net/ipv4/tcp_input.c
+      Proportional Rate Reduction. A cong_control struct_ops program causes
+      the kernel to skip its own PRR recovery-phase rate limiting entirely,
+      so skyline_apply_prr() supplies an equivalent.
+      Copyright (C) the Linux kernel contributors.
+
+  net/ipv4/tcp_bbr.c
+      Referenced for design, not reimplemented: BBR assigns cwnd from its
+      own target each round rather than converging by additive increase,
+      which is the approach skyline_set_cwnd_target() follows.
+      TCP BBR: Copyright (C) 2016-2017 Google, Inc.
+
+The Linux kernel is licensed under GPL-2.0 WITH Linux-syscall-note.
+
+--------------------------------------------------------------------------
+Trademarks
+--------------------------------------------------------------------------
+
+"Skyline Speeder" and "CYBERVERSE" are trademarks of CYBERVERSE LLC. The
+GPL-2.0 license granted over this software does not grant any right to use
+them. A fork is free to use the code and must not use these names to
+identify itself or to suggest endorsement.
+
+"Skyline Connect" is the mark of the project's sponsor and is used here as
+a sponsorship credit only.
+
+--------------------------------------------------------------------------
+Third-party build and runtime dependencies
+--------------------------------------------------------------------------
+
+These are used but not vendored; each remains under its own license.
+
+  libbpf (LGPL-2.1 OR BSD-2-Clause) -- via libbpf-rs
+  bpftool (GPL-2.0) -- generates bpf/include/vmlinux.h at build time
+  clang / LLVM (Apache-2.0 WITH LLVM-exception) -- compiles the BPF objects
+
+Rust crate dependencies and their licenses are declared in Cargo.toml and
+resolved in Cargo.lock.

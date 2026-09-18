@@ -1,0 +1,57 @@
+generation = 1
+enabled_modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+# See config/speeder.toml's comment: PRR-style recovery-phase rate limiting,
+# baseline-framework fix, applies regardless of enabled_modules by default
+# (M2-off path only, see bpf/skyline_cc.bpf.c's top-of-file comment).
+prr_pacing_enabled = true
+# See config/speeder.toml's comment: kernel-equivalent pacing-rate ceiling used
+# when M4 is off, same independent-switch shape as prr_pacing_enabled.
+auto_pacing_enabled = true
+fallback_cc = "cubic"
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+# See config/speeder.toml's comment: RTT-relative queue guardrail ratio.
+max_queue_delay_ratio = 1.0
+# See config/speeder.toml's comment: aggressive initial window.
+initial_cwnd_packets = 100
+
+# 这两段的默认值可能被实验矩阵通过 `ssctl set-module-config`（见
+# research/experiments/run_matrix.py 的 apply_module_config()）逐 case 覆盖；
+# 不像 [rack_tuning] 那样有"guest 必须整段省略"的强约束，因为这里走的是
+# skyline-speederd 自己管理的内存态配置，不存在被外部 sysctl 写入绕过的风险。
+# See config/speeder.toml's comment for the full rationale (targeting the
+# 10-20% loss / 100-300ms RTT deployment box).
+[adaptive_cwnd]
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+# See config/speeder.toml's comment: queue-delay/ECN guardrail cut.
+guardrail_gain = 0.8
+
+[loss_classifier]
+# See config/speeder.toml's comment: single loss-rate compensation factor.
+loss_inflation_max_ratio = 0.5
+
+# [rack_tuning] 必须整段保持注释：这台 guest 由实验矩阵
+# （infra/apply-guest-profile.sh）逐 case 精确控制 tcp_recovery/
+# tcp_reordering/tcp_early_retrans。skyline-speederd 绝不能在这里接管这几个 sysctl，
+# 否则 daemon 重启会把 per-case 精确值悄悄覆盖回默认值——见
+# crates/skyline-common/src/lib.rs 的 guest_config_never_owns_global_sysctls 测试。
+
+# [rack_rto] per-case 数值由实验矩阵通过 `ssctl set-rack-rto` 下发（见
+# research/experiments/run_matrix.py 的 apply_profile()），这里同样保持默认
+# 关闭（enabled=false），不在配置文件里设置具体数值。
+
+[runtime]
+bpf_dir = "/opt/skyline-speeder/bpf"
+pin_dir = "/sys/fs/bpf/skyline-speeder"
+cgroup_path = "/sys/fs/cgroup/skyline-speeder"
+socket_path = "/run/skyline-speeder/speeder.sock"
+state_path = "/run/skyline-speeder/state.json"
+events_path = "/run/skyline-speeder/events.jsonl"
+tc_interface = "data0"

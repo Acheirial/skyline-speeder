@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# Secrets and machine-local state
+#
+# Nothing here should ever reach a public repository. The patterns are
+# deliberately broad: forcing an explicit `git add -f` for a false positive is
+# far cheaper than leaking one private key.
+# ---------------------------------------------------------------------------
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.csr
+id_rsa*
+id_ecdsa*
+id_ed25519*
+*.ppk
+known_hosts
+authorized_keys
+.env
+.env.*
+!.env.example
+secrets.*
+*credential*
+*secret*
+*.kubeconfig
+
+# Lab inventories carry real hostnames, IPs and usernames. Keep templates,
+# ignore the filled-in copies.
+inventory.ini
+hosts.ini
+*.local.toml
+*.local.conf
+*.local.yaml
+*.local.yml
+
+# infra/prepare-cloud-init.sh renders user-data from the template with the
+# operator's real SSH public key substituted in. Template in, render out.
+user-data
+!user-data.template
+
+# ---------------------------------------------------------------------------
+# Build artifacts
+#
+# vmlinux.h is generated from the *running kernel's* BTF and is therefore
+# machine-specific -- regenerate with `make bpf`, never commit it.
+# ---------------------------------------------------------------------------
+/build/
+/target/
+/bpf/include/vmlinux.h
+*.bpf.o
+*.part
+
+# ---------------------------------------------------------------------------
+# Test-bed outputs
+# ---------------------------------------------------------------------------
+/research/experiments/runs/
+/research/experiments/analysis/
+/research/experiments/calibration/
+results/
+*.pcap
+*.pcapng
+*.log
+*.qcow2
+*.img
+*.iso
+
+# ---------------------------------------------------------------------------
+# Python / Rust
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+/.venv/
+venv/
+*.egg-info/
+
+# ---------------------------------------------------------------------------
+# Editor / OS / agent session state
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+.claude/

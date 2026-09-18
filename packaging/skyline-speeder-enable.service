@@ -1,0 +1,15 @@
+[Unit]
+Description=Attach Skyline Speeder skyline_cc and select it as the system TCP congestion control
+Documentation=file:/usr/share/doc/skyline-speeder/01-deployment-guide.md
+After=skyline-speederd.service
+Requires=skyline-speederd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=120
+ExecStart=/opt/skyline-speeder/infra/boot-enable.sh
+ExecStop=/opt/skyline-speeder/infra/boot-disable.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,110 @@
+# rtt300 三点加样本——rtt300-loss10/loss20 两点在 n=2 下 Skyline Speeder/BBR
+# 中位数比值和 Skyline Speeder 自身 CV 都不够稳。跟 target-box.toml 用完全相同的
+# profile 定义（含 rack_rto/guardrail_gain），只是把这 3 个场景的 runs
+# 从 2 提到 5，比给全部 9 点都加样本便宜得多。
+#
+# 5 profile × 3 场景 × runs=5 = 75 case，约 65 分钟。
+name = "target-box-rtt300-samples"
+execution_class = "formal-kvm"
+performance_valid = true
+seed = 20260807
+warmup_s = 12
+duration_s = 25
+runs = 5
+stock_qdisc = "fq_codel"
+server_ssh = "skyline@127.0.0.1:2222"
+client_ssh = "skyline@127.0.0.1:2223"
+server_data_ip = "10.20.1.2"
+server_data_interface = "data0"
+
+[[profiles]]
+id = "b0-stock-cubic"
+kind = "stock-cubic"
+cc = "cubic"
+modules = []
+
+[[profiles]]
+id = "b1-controlled-cubic"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[[profiles]]
+id = "bbr-fq"
+kind = "bbr"
+cc = "bbr"
+modules = []
+
+[[profiles]]
+id = "b2-skyline-base"
+kind = "skyline"
+cc = "skyline_cc"
+modules = []
+
+[[profiles]]
+id = "skyline-best"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+guardrail_gain = 0.8
+loss_inflation_max_ratio = 0.5
+
+[profiles.rack_rto]
+enabled = true
+srtt_permille = 1100
+floor_us = 20000
+ceiling_us = 200000
+warmup_samples = 4
+rto_max_normal_permille = 3000
+rto_max_congested_permille = 6000
+rto_max_congestion_ratio_permille = 0
+
+[[scenarios]]
+id = "rtt300-loss10"
+rtt_ms = 300
+rate_mbit = 100
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 10.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+
+[[scenarios]]
+id = "rtt300-loss15"
+rtt_ms = 300
+rate_mbit = 100
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 15.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+
+[[scenarios]]
+id = "rtt300-loss20"
+rtt_ms = 300
+rate_mbit = 100
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 20.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"

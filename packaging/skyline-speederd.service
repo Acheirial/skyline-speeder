@@ -1,0 +1,20 @@
+[Unit]
+Description=Skyline Speeder experimental TCP congestion-control daemon
+After=network.target
+ConditionPathExists=/etc/skyline-speeder/speeder.toml
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /sys/fs/bpf/skyline-speeder /sys/fs/cgroup/skyline-speeder
+ExecStart=/usr/local/sbin/skyline-speederd --config /etc/skyline-speeder/speeder.toml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=false
+ProtectSystem=strict
+RuntimeDirectory=skyline-speeder
+ReadWritePaths=-/sys/fs/bpf/skyline-speeder -/sys/fs/cgroup/skyline-speeder
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

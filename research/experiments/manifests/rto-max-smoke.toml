@@ -1,0 +1,125 @@
+# M1 tier-2 TCP_RTO_MAX_MS 上限调节——机制 + 方向性烟雾测试。
+#
+# 倍数（没有拥塞证据 3x、出现证据 6x base_rtt）是直接拍定的，不再跑矩阵
+# 实验去比较候选值——这份 manifest 只验证机制端到端跑得通、方向对，不追
+# 求统计置信的"最优值"结论，所以 runs=1 让 CV 门槛自动失效。
+#
+# 场景设计的关键约束：真实的 RTO 超时要求一整个飞行窗口内的包全部丢失
+# （否则 RACK 的乱序窗口推断会先把它们当成快速重传处理掉，根本轮不到 RTO
+# 计时器），所以常规的独立同分布随机丢包在飞行窗口有上百个包的场景里很难
+# 可靠触发——这也是为什么 forced-rto-burst 场景故意用低带宽（压小飞行
+# 窗口）+ Gilbert-Elliott 突发丢包模型（burst_length 故意设得比满窗口飞行
+# 量还大，保证坏状态持续时间稳定超过一整个 RTT）而不是调大随机丢包比例。
+# offload=off 是必需的：GSO 打开时 netem 一次丢弃会砍掉一整个 GSO 超帧，
+# "连续 220 个包"的语义会被破坏。
+#
+# rtt200-loss15 是从 target-box.toml 原样复制的一个点（独立同分布
+# 随机丢包，不是突发），作为"没把正常场景的恢复行为搞坏"的回归检查——
+# 这类场景里真实 RTO 事件本就该很少，rtomax-off/rtomax-on 在这里应该基本
+# 没有可观测差异。
+name = "rto-max-smoke"
+execution_class = "formal-kvm"
+performance_valid = true
+seed = 20260805
+warmup_s = 5
+duration_s = 20
+runs = 1
+stock_qdisc = "fq_codel"
+server_ssh = "skyline@127.0.0.1:2222"
+client_ssh = "skyline@127.0.0.1:2223"
+server_data_ip = "10.20.1.2"
+server_data_interface = "data0"
+
+[[profiles]]
+id = "b1-controlled-cubic"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[[profiles]]
+id = "rtomax-off"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+guardrail_gain = 0.8
+loss_inflation_max_ratio = 0.5
+
+[profiles.rack_rto]
+enabled = true
+srtt_permille = 1100
+floor_us = 20000
+ceiling_us = 200000
+warmup_samples = 4
+rto_max_normal_permille = 0
+rto_max_congested_permille = 0
+rto_max_congestion_ratio_permille = 0
+
+[[profiles]]
+id = "rtomax-on"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+guardrail_gain = 0.8
+loss_inflation_max_ratio = 0.5
+
+[profiles.rack_rto]
+enabled = true
+srtt_permille = 1100
+floor_us = 20000
+ceiling_us = 200000
+warmup_samples = 4
+rto_max_normal_permille = 3000
+rto_max_congested_permille = 6000
+rto_max_congestion_ratio_permille = 0
+
+[[scenarios]]
+id = "forced-rto-burst"
+rtt_ms = 150
+rate_mbit = 15
+queue_bdp = 1.0
+loss_model = "gemodel"
+loss_pct = 8.0
+loss_direction = "data"
+burst_length = 220
+parallel = 1
+offload = "off"
+
+[[scenarios]]
+id = "rtt200-loss15"
+rtt_ms = 200
+rate_mbit = 100
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 15.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"

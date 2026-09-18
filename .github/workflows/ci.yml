@@ -1,0 +1,151 @@
+# Continuous integration.
+#
+# What CI can and cannot do for this project, stated plainly because it changes
+# how you should read a green check mark:
+#
+#   CAN   compile the three CO-RE BPF objects, build and test the Rust control
+#         plane, lint the shell scripts, run the experiment-harness unit tests.
+#   CANNOT load any BPF object. GitHub runners do not run a 6.12+ kernel and the
+#         four-argument `cong_control` signature skyline_cc depends on does not
+#         exist below 6.10, so the verifier would reject it for reasons that say
+#         nothing about the change under review.
+#   CANNOT produce performance numbers. Those come only from the two-VM test bed
+#         described in research/experiments/README.md.
+#
+# The real gate stays local and is stated in CONTRIBUTING.md:
+#   skyline-speederd --config config/speeder.toml --validate-only --verify-bpf
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust (fmt, check, test)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # libbpf-rs builds libbpf-sys, which needs libelf and zlib headers and a
+      # C toolchain. pkg-config is how it finds them.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential pkg-config clang llvm \
+            libbpf-dev libelf-dev zlib1g-dev
+
+      # rust-toolchain.toml pins the channel; rustup honours it automatically.
+      - name: Show toolchain
+        run: cargo --version && rustc --version && cargo fmt --version
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Static check
+        run: cargo check --workspace --all-targets
+
+      - name: Unit tests
+        run: cargo test --workspace
+
+  bpf:
+    name: BPF (CO-RE compile only)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang and libbpf
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang llvm libbpf-dev libelf-dev zlib1g-dev
+
+      # bpftool is only needed to dump the running kernel's BTF into vmlinux.h.
+      # Its packaging differs across Ubuntu releases, so try the candidates in
+      # order rather than assuming one of them.
+      - name: Install bpftool
+        run: |
+          sudo apt-get install -y -qq bpftool \
+            || sudo apt-get install -y -qq linux-tools-common linux-tools-generic \
+            || echo "bpftool not installable from the archive"
+          command -v bpftool || ls -l /usr/lib/linux-tools/*/bpftool || true
+
+      # CO-RE needs the host's BTF. Runner images normally ship it, but if a
+      # future image does not, that is a runner-infrastructure fact and not a
+      # defect in the pull request -- warn and skip rather than paint the check
+      # red for something no contributor can fix.
+      - name: Compile CO-RE objects
+        run: |
+          if [ ! -r /sys/kernel/btf/vmlinux ]; then
+            echo "::warning::/sys/kernel/btf/vmlinux is absent on this runner; skipping the BPF compile"
+            exit 0
+          fi
+          BPFTOOL=$(command -v bpftool || echo /usr/lib/linux-tools/*/bpftool | awk '{print $1}')
+          if [ ! -x "$BPFTOOL" ]; then
+            echo "::warning::no usable bpftool on this runner; skipping the BPF compile"
+            exit 0
+          fi
+          echo "using bpftool: $BPFTOOL"
+          make bpf BPFTOOL="$BPFTOOL"
+          ls -l build/bpf/
+
+      - name: Note what was not checked
+        run: |
+          {
+            echo "### BPF objects compiled, not loaded"
+            echo
+            echo "Runner kernel: \`$(uname -r)\`. skyline_cc needs 6.12 LTS or newer to load."
+            echo "Run the verifier locally before merging:"
+            echo
+            echo '```'
+            echo "skyline-speederd --config config/speeder.toml --validate-only --verify-bpf"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  shell:
+    name: Shell (shellcheck, syntax)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+
+      # Severity warning and above. Repository-wide exclusions, with the reason
+      # each one is a false positive here, live in .shellcheckrc.
+      - name: shellcheck
+        run: |
+          shellcheck -S warning install.sh scripts/*.sh infra/*.sh \
+            infra/kernel/*.sh research/experiments/*.sh
+
+      - name: Syntax
+        run: bash -n install.sh scripts/*.sh infra/*.sh infra/kernel/*.sh research/experiments/*.sh
+
+  python:
+    name: Experiment harness (unit tests)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor: research/experiments/matrix_lib.py imports tomllib,
+        # which entered the standard library in 3.11.
+        python: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Unit tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m unittest discover -s research/experiments/tests -v

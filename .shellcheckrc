@@ -1,0 +1,14 @@
+# shellcheck configuration.
+#
+# Two checks are disabled repository-wide because every current hit is a false
+# positive. Disabling them here rather than per line keeps the exclusion in one
+# reviewable place -- if a real instance ever appears, delete the line and fix
+# the code.
+#
+# SC1007: `CDPATH= cd -- "$(dirname -- "$0")/.."` is a prefix assignment that
+#         neutralises CDPATH for that one command. It is the correct idiom, not
+#         a mistyped assignment.
+# SC2054: QEMU arguments legitimately contain commas (`-accel tcg,thread=multi`).
+#         They are one argument, not an array of several.
+disable=SC1007
+disable=SC2054

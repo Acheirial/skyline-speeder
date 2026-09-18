@@ -1,0 +1,152 @@
+# 重传包 DSCP 标记——IPv6 机制验证。跟 retransmit-dscp-mechanism.toml
+# 是同一份验证的双栈孪生：profile 定义逐字复制（CC/modules 跟地址族无
+# 关，检测逻辑本身也是——见 bpf/skyline_tc.bpf.c 的 skyline_parse_ipv6()），唯一
+# 差异是两个 scenario 都加了 address_family = "v6"，manifest 级多一个
+# server_data_ip6。完整原理性说明（四组 case 分别验证什么、
+# retransmit_marked 跟 retransmit_capture_marked 的口径差异）见
+# retransmit-dscp-mechanism.toml 的头注释，这里不重复。
+#
+# IPv6 专属的验证点（v4 版本测不出来的）：
+#   - skyline_parse_ipv6() 的扩展头遍历/DSCP 读写路径本身是否正确——已通过独立
+#     spike（bpftool prog run 构造报文）和真实抓包验证过，这份 manifest
+#     是端到端集成验证，不是重新做 spike。
+#   - retransmit_dscp.stats 的 ipv6_marked/ipv6_chain_bailout 两个新计数
+#     器在真实流量下的行为（marked 应随真实重传增长，bailout 应保持在
+#     "非 TCP 背景流量"的基线附近，不应该异常飙高——见 skyline_abi.h 里
+#     ipv6_chain_bailout 的注释）。
+#   - analyze_results.py 的 IPv6 tcpdump 单行格式解析器（跟 IPv4 的
+#     header+缩进两行格式结构不同，已用真实抓包样本验证，见
+#     research/experiments/tests/test_analysis.py 的 *_ipv6 测试）。
+#
+# 地址：infra/topology.sh 的 fd20:1::/64（server 侧）/ fd20:2::/64
+# （client 侧）ULA 编址，跟 IPv4 的 10.20.1.0/24 / 10.20.2.0/24 一一对应。
+name = "retransmit-dscp-mechanism-v6"
+execution_class = "formal-kvm"
+performance_valid = true
+seed = 20260807
+warmup_s = 3
+duration_s = 8
+runs = 1
+stock_qdisc = "fq_codel"
+server_ssh = "skyline@127.0.0.1:2222"
+client_ssh = "skyline@127.0.0.1:2223"
+server_data_ip = "10.20.1.2"
+server_data_ip6 = "fd20:1::2"
+server_data_interface = "data0"
+
+[[profiles]]
+id = "b0-stock-cubic"
+kind = "stock-cubic"
+cc = "cubic"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 10
+
+[[profiles]]
+id = "b1-controlled-cubic"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 10
+
+[[profiles]]
+id = "bbr-fq"
+kind = "bbr"
+cc = "bbr"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 10
+
+[[profiles]]
+id = "skyline-best"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+guardrail_gain = 0.8
+loss_inflation_max_ratio = 0.5
+
+[profiles.rack_rto]
+enabled = true
+srtt_permille = 1100
+floor_us = 20000
+ceiling_us = 200000
+warmup_samples = 4
+rto_max_normal_permille = 3000
+rto_max_congested_permille = 6000
+rto_max_congestion_ratio_permille = 0
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 10
+
+# 用于关闭对照。跟 bbr-fq 完全一致，只有 retransmit_dscp.enabled 换成
+# false——跟 v4 版本同样的理由，只需要证明一次"关掉开关确实不再标记"。
+[[profiles]]
+id = "bbr-fq-dscp-off"
+kind = "bbr"
+cc = "bbr"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = false
+dscp_value = 0
+
+# 用于 DSCP 数值跟踪对照的第二个取值。
+[[profiles]]
+id = "bbr-fq-dscp46"
+kind = "bbr"
+cc = "bbr"
+modules = []
+
+[profiles.retransmit_dscp]
+enabled = true
+dscp_value = 46
+
+[[scenarios]]
+id = "retransmit-mechanism-v6"
+rtt_ms = 100
+rate_mbit = 50
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 5.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+capture_retransmits = true
+address_family = "v6"
+
+[[scenarios]]
+id = "retransmit-zero-loss-v6"
+rtt_ms = 20
+rate_mbit = 100
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 0.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+offload = "off"
+capture_retransmits = true
+address_family = "v6"

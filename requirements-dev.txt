@@ -1,0 +1,6 @@
+# Development dependencies for the experiment harness under research/experiments.
+#
+# Python 3.11 or newer is required: matrix_lib.py imports `tomllib`, which only
+# entered the standard library in 3.11. On 3.10 and earlier the harness unit
+# tests fail at import with ModuleNotFoundError, not with a useful message.
+matplotlib==3.11.1

@@ -1,0 +1,69 @@
+name: It installed fine but did not make things faster
+description: Throughput did not improve, or got worse
+labels: [performance, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Most reports of this kind are the tool being used outside the environment it is for.**
+
+        Skyline Speeder assumes loss carries no congestion information. It targets
+        links with **non-congestive random loss** — 10-20% loss, 100-300 ms RTT,
+        bandwidth to spare. On a genuinely congested bottleneck it will keep
+        pushing, hurt itself, and hurt everything sharing the path. That is a
+        documented property, not a bug (`docs/04-performance-report.md`, section 9).
+
+        Pure reordering is also a known weak spot: `reorder-dsack` measures about
+        9% below CUBIC and 13% below BBR.
+
+  - type: checkboxes
+    id: loss-nature
+    attributes:
+      label: What kind of loss does your link actually have
+      description: |
+        The cheap test: push a fixed-rate UDP flood at the same rate and watch its loss.
+        Zero UDP loss while TCP retransmits heavily means the loss is your own bursts
+        overflowing a queue — congestion — and this is the wrong tool.
+      options:
+        - label: I tested with a fixed-rate UDP flow and it also loses packets (loss is not queue overflow)
+        - label: I have not tested this yet
+  - type: input
+    id: link
+    attributes:
+      label: Link characteristics
+      description: Measured RTT, measured loss rate, and the bandwidth you believe the path has.
+      placeholder: "RTT 180 ms, loss 12%, path ~200 Mbit/s"
+    validations:
+      required: true
+
+  - type: textarea
+    id: baseline
+    attributes:
+      label: Baseline comparison
+      description: |
+        Numbers for the same test with, at minimum, stock CUBIC and stock BBR, plus
+        Skyline Speeder with all modules off (`ssctl enable --all-off`) if you can.
+        A single number with nothing to compare it against cannot be triaged.
+      placeholder: |
+        cubic:            12 Mbit/s
+        bbr:              48 Mbit/s
+        skyline (all-off): 12 Mbit/s
+        skyline (default): 40 Mbit/s
+    validations:
+      required: true
+
+  - type: textarea
+    id: status
+    attributes:
+      label: ssctl status
+      description: Full output, taken while the slow transfer is running.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: "`/etc/skyline-speeder/speeder.toml` with anything sensitive removed."
+      render: toml

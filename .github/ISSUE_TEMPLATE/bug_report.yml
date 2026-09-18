@@ -1,0 +1,91 @@
+name: Bug report
+description: Something behaves incorrectly, crashes, or fails to load
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Three failure modes in this project report **no error at all** and are by
+        far the most common reports. Please rule them out before filing:
+
+        1. `ssctl enable` was never run — the daemon does not attach `skyline_cc` on startup.
+        2. The process is not inside `/sys/fs/cgroup/skyline-speeder` — the dynamic RTO half never runs. Symptom: `rack_rto.stats.applied` stays at 0.
+        3. `runtime.tc_interface` points at the wrong NIC.
+
+        The decision tree is in `DEPLOY.md` section 7.
+
+  - type: checkboxes
+    id: ruled-out
+    attributes:
+      label: Silent failure modes ruled out
+      options:
+        - label: I ran `ssctl enable` (or the enable unit is active)
+          required: true
+        - label: The affected process is in the skyline-speeder cgroup, or the report does not involve dynamic RTO
+          required: true
+        - label: "`runtime.tc_interface` matches my real egress interface"
+          required: true
+
+  - type: input
+    id: kernel
+    attributes:
+      label: Kernel version
+      description: Output of `uname -r`. Anything below 6.12 is unsupported; 6.1.x and 6.6.x cannot work at all.
+      placeholder: "6.12.101"
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution
+      description: "`. /etc/os-release && echo $PRETTY_NAME`"
+      placeholder: "Debian GNU/Linux 13 (trixie)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How was it installed
+      options:
+        - scripts/bootstrap.sh (curl | sudo bash)
+        - git clone + sudo ./install.sh
+        - built by hand (make bpf + cargo build)
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, what you got instead, and the exact commands you ran.
+    validations:
+      required: true
+
+  - type: textarea
+    id: status
+    attributes:
+      label: ssctl status
+      description: Full output. This carries the capability probe results and the decision counters, and is the single most useful thing in the report.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: verifier
+    attributes:
+      label: Verifier output
+      description: |
+        Output of:
+        `skyline-speederd --config /etc/skyline-speeder/speeder.toml --validate-only --verify-bpf`
+        Required if anything failed to load.
+      render: shell
+
+  - type: textarea
+    id: journal
+    attributes:
+      label: Daemon log
+      description: "`journalctl -u skyline-speederd.service -n 100 --no-pager`"
+      render: shell

@@ -1,0 +1,111 @@
+# 中性性复核。guardrail_gain 已核对代码：queue_clamped 的增益钳位只发生
+# 在 M2 开启（skyline_set_cwnd_target）/M4 开启（skyline_apply_pacing）这两条路径
+# 里，b2-skyline-base 全模块关闭时完全不会经过这两个函数，理论上不影响这条
+# 中性基线；花小成本用真实测试确认一次比只依赖代码推理更可靠。
+#
+# 3 profile（b1-controlled-cubic/b2-skyline-base/skyline-best，skyline-best 同
+# target-box.toml 带 rack_rto+guardrail_gain）× 4 场景（0%~0.5%丢包）
+# × runs=2 = 24 case，~25 分钟。
+#
+# 验收：沿用 analyze_results.py 现成的 B1/B2 门槛（line-rate 场景 goodput
+# 差异 ±3%、P95 RTT 差异 ±10%）。
+name = "neutrality"
+execution_class = "formal-kvm"
+performance_valid = true
+seed = 20260809
+warmup_s = 15
+duration_s = 30
+runs = 2
+stock_qdisc = "fq_codel"
+server_ssh = "skyline@127.0.0.1:2222"
+client_ssh = "skyline@127.0.0.1:2223"
+server_data_ip = "10.20.1.2"
+server_data_interface = "data0"
+
+[[profiles]]
+id = "b1-controlled-cubic"
+kind = "controlled-cubic"
+cc = "cubic"
+modules = []
+
+[[profiles]]
+id = "b2-skyline-base"
+kind = "skyline"
+cc = "skyline_cc"
+modules = []
+
+[[profiles]]
+id = "skyline-best"
+kind = "skyline"
+cc = "skyline_cc"
+modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+
+[profiles.module_config]
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+max_queue_delay_ratio = 1.0
+initial_cwnd_packets = 100
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+startup_gain = 3.0
+cruise_inflight_gain = 2.0
+cruise_pacing_gain = 1.1
+guardrail_gain = 0.8
+loss_inflation_max_ratio = 0.5
+
+[profiles.rack_rto]
+enabled = true
+srtt_permille = 1100
+floor_us = 20000
+ceiling_us = 200000
+warmup_samples = 4
+rto_max_normal_permille = 3000
+rto_max_congested_permille = 6000
+rto_max_congestion_ratio_permille = 0
+
+[[scenarios]]
+id = "dc-lowrtt"
+rtt_ms = 2
+rate_mbit = 1000
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 0.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+
+[[scenarios]]
+id = "line-rate"
+rtt_ms = 20
+rate_mbit = 1000
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 0.0
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+
+[[scenarios]]
+id = "light-loss"
+rtt_ms = 80
+rate_mbit = 500
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 0.1
+loss_direction = "data"
+burst_length = 1
+parallel = 1
+
+[[scenarios]]
+id = "primary"
+rtt_ms = 150
+rate_mbit = 500
+queue_bdp = 1.0
+loss_model = "random"
+loss_pct = 0.5
+loss_direction = "data"
+burst_length = 1
+parallel = 1

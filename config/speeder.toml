@@ -1,0 +1,120 @@
+generation = 1
+enabled_modules = ["early-loss", "adaptive-cwnd", "loss-classifier", "pacing"]
+# Baseline-framework PRR-style continuous recovery-phase rate limiting (see
+# FeatureMask::PRR / bpf/include/skyline_abi.h's SKYLINE_FEATURE_PRR doc comment) --
+# NOT one of the M1-M4 ablation modules above: it applies by default even to
+# a profile with enabled_modules=[] (e.g. b2-skyline-base), since it fixes a
+# baseline-parity bug (cong_control bypasses the kernel's own PRR) rather
+# than adding an optional feature. Only exercised on the M2-off path --
+# with M2 (adaptive-cwnd) on, skyline_cong_control() bypasses PRR entirely (see
+# bpf/skyline_cc.bpf.c's top-of-file comment). Set to false only for rollback/A-B
+# comparison against the pre-PRR behavior.
+prr_pacing_enabled = true
+# Kernel-equivalent pacing-rate ceiling used when M4 (pacing) is off (see
+# prr_pacing_enabled's comment -- same rationale, same independent-switch
+# shape). Set to false only for rollback/A-B comparison.
+auto_pacing_enabled = true
+fallback_cc = "cubic"
+max_pacing_mbps = 1200
+max_cwnd_packets = 50000
+max_queue_delay_ms = 100
+# Ratio of base RTT added to max_queue_delay_ms to form the actual guardrail
+# (max of the two -- see skyline_max_queue_delay_us() in bpf/skyline_cc.bpf.c). 1.0
+# lets the guardrail widen automatically on higher-RTT paths instead of
+# staying pinned to the fixed 100ms floor, which is what makes the much
+# higher cruise_inflight_gain/cruise_pacing_gain below safe on the target
+# box's 100-300ms-RTT scenarios they were tuned against.
+max_queue_delay_ratio = 1.0
+# Aggressive initial window (see bpf/include/skyline_abi.h's
+# initial_cwnd_packets doc comment) -- standard IW10 slow-start takes ~7
+# RTTs (2.1s at 300ms RTT) to reach 1000 packets, too slow for the target
+# box's high-RTT corner. 0 disables this (falls back to the kernel's own
+# initial window).
+initial_cwnd_packets = 100
+
+# 这两段（[adaptive_cwnd]/[loss_classifier]）的全部数值现在都可以在不重启
+# skyline-speederd 的情况下用 `ssctl set-module-config`/`reset-module-config` 在线覆盖
+# ——这里的值只是 daemon 启动时的初始默认值，运行期实际生效的值以
+# `ssctl status` 里的 `module_tuning` 字段为准。
+#
+# 针对目标部署环境（丢包率10-20%、RTT 100-300ms、带宽数十到数百Mbps，公平性
+# 不是目标）：M2 是 STARTUP/CRUISE 两态状态机，开启时直接掌管全部 CA 状态下
+# 的 cwnd（不被 PRR 接管），cruise_inflight_gain/cruise_pacing_gain 是 CRUISE
+# 终态的增益系数。见 bpf/include/skyline_abi.h 顶部注释与 docs/03-design.md。
+[adaptive_cwnd]
+min_rtt_window_s = 10
+bw_window_rtts = 10
+startup_plateau_rtts = 3
+startup_growth_ratio = 0.25
+# SKYLINE_MODE_STARTUP 的单一增益（cwnd 目标和 pacing 速率共用）。
+startup_gain = 3.0
+# SKYLINE_MODE_CRUISE 的 cwnd 目标增益——刻意比 cruise_pacing_gain 更宽松，
+# cwnd 只需要不成为限制因素，真正的限速器是 pacing。在目标环境网格上按
+# 吞吐与自伤风险权衡选定：更激进的候选在测试台带宽上限下没有带来提升，
+# 反而在高 RTT/高丢包点因过量发送略有下降；这组取值与更保守的候选相比
+# 吞吐持平或更优，且在真实拥塞型瓶颈上自伤风险更低。
+cruise_inflight_gain = 2.0
+# SKYLINE_MODE_CRUISE 的 pacing 速率增益——M4 开启时真正生效的限速值。
+cruise_pacing_gain = 1.1
+# 队列时延/ECN 护栏触发时对 cwnd 目标和 pacing 速率共同生效的增益——
+# 这是 Skyline Speeder 唯一还承认的真实拥塞信号，触发时不该只是"停止加速"（增益回到
+# 1.0），而应该主动降速。0.8 = 降到测得带宽的 80%，是一个尚待用小规模实验
+# 验证的初始值，不是已经证明最优的数值；0.0 表示只取消加速、不主动降速
+# （增益回到 1.0）。
+guardrail_gain = 0.8
+
+[loss_classifier]
+# M3 是单一丢包率补偿系数（1/(1-p)，见 bpf/skyline_cc.bpf.c 的
+# skyline_loss_inflation_permille() 文档注释），不做多路丢包分类——目标环境下
+# "永远不因丢包降窗"才是正确答案。0.5 = 补偿到测得丢包率50%封顶
+# （2.0x），覆盖目标环境的10-20%丢包上界并留出重传开销的余量。
+loss_inflation_max_ratio = 0.5
+
+# [rack_tuning]
+# 全局 RACK sysctl 默认值。留空/整段省略 = skyline-speederd 不接管，所有权交给实验矩阵
+# 的 infra/apply-guest-profile.sh 逐 case 控制。取消注释表示 skyline-speederd 启动时会把
+# 这些值写入 /proc/sys/net/ipv4/*，写入失败则守护进程启动失败。
+# tcp_recovery = 1        # 位掩码，仅 1|3|5|7 合法
+# tcp_reordering = 3      # 1..=300
+# tcp_early_retrans = 3   # 0..=4
+
+# M1 per-flow 动态 RTO 下限（TCP_BPF_RTO_MIN），由 skyline_policy.bpf.c 在
+# BPF_SOCK_OPS_RTT_CB 里应用。目标环境下更快的丢包检测能直接减少停顿，
+# 默认开启（实验矩阵仍会按 case 通过 `ssctl set-rack-rto` 覆盖，见
+# config/speeder-guest.toml）。
+[rack_rto]
+enabled = true
+srtt_permille = 1100    # target = max(srtt_us, min_rtt_us) * this / 1000
+floor_us = 20000        # 绝对安全下限（微秒）
+ceiling_us = 200000     # 绝对安全上限（微秒），不超过内核 TCP_RTO_MIN=200ms
+warmup_samples = 4      # 前 N 个 RTT 样本只观测不下发
+
+# TCP_RTO_MAX_MS（RTO 退避的真正上限，内核默认 ~120s）。ceiling =
+# clamp(k * base_rtt, 1000ms, 120000ms)，base_rtt = max(srtt_us, min_rtt_us)，
+# 与上面 RTO_MIN floor 用的基线算法一致（对重排序导致 min_rtt 塌陷到 0 有防护）。
+# 出现真实拥塞证据（收到新的 CE 标记，或 srtt 明显超过 min_rtt）时用
+# rto_max_congested_permille 代替 rto_max_normal_permille——不会回退到内核
+# 120s 默认值，只是换一个更大的倍数，公式始终挂在 base_rtt 上。
+# 倍数直接拍定：没有拥塞证据时 3 倍 base_rtt，出现证据后 6 倍——不做额外的
+# 矩阵实验筛选，后续如有真实数据显示需要调整再改。
+rto_max_normal_permille = 3000
+rto_max_congested_permille = 6000
+rto_max_congestion_ratio_permille = 0  # 0 = 使用内置默认 2000（即 srtt > 2x min_rtt 算拥塞证据）
+
+# 给重传包打 DSCP 标记，供网络侧按 DSCP 走不同
+# upstream。dscp_value 是"占位参数"——具体编码值由网络侧策略决定，这里不
+# 应该硬编码一个真实生产值，默认关闭（enabled=false）。由
+# bpf/skyline_tc.bpf.c（接口级 TC egress，不分 cgroup）实施，对
+# runtime.tc_interface 上的全部 TCP 流一致生效，不区分跑的是哪种拥塞控制。
+[retransmit_dscp]
+enabled = false
+dscp_value = 0
+
+[runtime]
+bpf_dir = "build/bpf"
+pin_dir = "/sys/fs/bpf/skyline-speeder"
+cgroup_path = "/sys/fs/cgroup/skyline-speeder"
+socket_path = "/run/skyline-speeder/speeder.sock"
+state_path = "/run/skyline-speeder/state.json"
+events_path = "/run/skyline-speeder/events.jsonl"
+tc_interface = "data0"

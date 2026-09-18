@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose a change in behaviour or a new capability
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you unable to do today? Describe the situation, not the solution you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints you have already considered
+      description: Not required, but a proposal that has thought about these is much easier to act on.
+      options:
+        - label: It can be expressed within the BPF verifier's limits (bounded loops, no floating point, limited stack)
+        - label: It does not change the shared ABI, or it says how SKYLINE_ABI_VERSION would be bumped
+        - label: It does not require a kernel patch (see docs/03-design.md section 5 for what the kernel does and does not expose)
