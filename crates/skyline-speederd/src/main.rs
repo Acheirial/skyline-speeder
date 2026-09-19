@@ -68,8 +68,17 @@ impl BpfRuntime {
         // Baseline before anything is attached: if the attach below fails, the
         // machine is left on a known-good algorithm rather than on whatever it
         // happened to be. `Request::Enable` raises it to skyline_cc only after
-        // the attach succeeds.
-        set_default_congestion_control(&config.fallback_cc)?;
+        // the attach succeeds. Skipped when skyline_cc is already registered:
+        // an ungraceful exit (SIGKILL on a service timeout, a crash) leaves
+        // the struct_ops attached in the kernel, since the Drop impl that
+        // unregisters it never ran. The baseline write would then demote the
+        // default from skyline_cc back to fallback, and the EEXIST attach
+        // failure below would leave it there -- boot-enable's readback is what
+        // surfaced this exact regression.
+        let already_registered = registered(SKYLINE_CC_NAME);
+        if !already_registered {
+            set_default_congestion_control(&config.fallback_cc)?;
+        }
         let mut cc_object = load_object(&cc_path)?;
         let mut runtime = Self {
             objects: Vec::new(),
@@ -80,12 +89,28 @@ impl BpfRuntime {
         };
         runtime.event_stop.store(true, Ordering::Release);
         update_config_maps(&mut cc_object, config, 0)?;
+        // The struct_ops map element is what the kernel keys registration on,
+        // not the Link. bpf_map__attach_struct_ops() has no attach-if-absent
+        // mode: it returns EEXIST over a registration left by an ungraceful
+        // exit (SIGKILL, crash) whose owning Drop never ran. Registering the
+        // same name twice is not possible either way, so there is nothing to
+        // do here in that state -- the object stays loaded for its config
+        // maps and the sysctl switch in Request::Enable is what actually
+        // moves new connections. Request::Drain owns the unregister.
         let struct_ops_link = {
             let mut map = find_map_mut(&mut cc_object, "skyline_cc")?;
-            map.attach_struct_ops()
-                .context("attach skyline_cc struct_ops")?
+            if !already_registered {
+                Some(
+                    map.attach_struct_ops()
+                        .context("attach skyline_cc struct_ops")?,
+                )
+            } else {
+                None
+            }
         };
-        runtime.links.push(struct_ops_link);
+        if let Some(link) = struct_ops_link {
+            runtime.links.push(link);
+        }
         // With the log off nothing drains the ring buffer: once it is full,
         // bpf_ringbuf_reserve() fails and skyline_emit() drops the event,
         // which costs less than reading and discarding every one.
@@ -728,6 +753,18 @@ fn apply_rack_tuning(tuning: &RackTuningConfig) -> Result<()> {
 
 fn read_sysctl_u32(path: &str) -> Option<u32> {
     fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+/// Whether a congestion control name is registered in
+/// /proc/sys/net/ipv4/tcp_available_congestion_control. Registered is not the
+/// same as the default: an attached struct_ops adds the name here, and only
+/// the tcp_congestion_control sysctl default moves new connections. This is
+/// the test for "already attached from an ungraceful exit", which is what
+/// makes BpfRuntime::load's attach path idempotent.
+fn registered(name: &str) -> bool {
+    fs::read_to_string("/proc/sys/net/ipv4/tcp_available_congestion_control")
+        .map(|available| available.split_whitespace().any(|n| n == name))
+        .unwrap_or(false)
 }
 
 /// Live re-read of the three RACK sysctls, taken fresh on every `status()`
