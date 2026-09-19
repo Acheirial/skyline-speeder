@@ -8,7 +8,7 @@
 
 [![License](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](LICENSE)
 [![Kernel](https://img.shields.io/badge/kernel-6.12%20LTS%2B-orange.svg)](#kernel-requirement)
-[![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-red.svg)](install.sh)
+[![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu%20%7C%20RHEL%209%2B-red.svg)](install.sh)
 [![eBPF](https://img.shields.io/badge/eBPF-CO--RE%20struct__ops-green.svg)](bpf/)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-black.svg)](rust-toolchain.toml)
 
@@ -103,7 +103,7 @@ curl -fsSL https://raw.githubusercontent.com/CYBERVERSE-Research/skyline-speeder
 curl -fsSL https://raw.githubusercontent.com/CYBERVERSE-Research/skyline-speeder/main/scripts/bootstrap.sh | sudo bash -s -- --prebuilt
 ```
 
-A minimal image may lack `curl` (`apt-get install -y curl`) or `sudo` (drop it if you are root). To read the scripts before running them, which is **recommended** since this changes the congestion control of every new connection on the machine:
+A minimal image may lack `curl` (`apt-get install -y curl`, or `dnf install -y curl` on RHEL 9+/Rocky/Alma/CentOS Stream/Fedora) or `sudo` (drop it if you are root). To read the scripts before running them, which is **recommended** since this changes the congestion control of every new connection on the machine:
 
 ```bash
 git clone https://github.com/CYBERVERSE-Research/skyline-speeder.git
@@ -176,7 +176,7 @@ sudo /opt/skyline-speeder/infra/run-in-skyline-cgroup.sh <your service command..
 
 ```
 skyline-speeder/
-├── install.sh                    one-command install (Debian/Ubuntu)
+├── install.sh                    one-command install (Debian/Ubuntu/RHEL family)
 ├── scripts/bootstrap.sh          remote installer entry point (curl | sudo bash)
 ├── bpf/
 │   ├── skyline_cc.bpf.c          struct_ops congestion control, runs on every ACK
@@ -200,8 +200,13 @@ skyline-speeder/
 ## Building from source
 
 ```bash
+# Debian/Ubuntu
 sudo apt-get install -y build-essential pkg-config clang llvm \
     libbpf-dev libelf-dev zlib1g-dev bpftool
+
+# RHEL 9+ / Rocky / AlmaLinux / CentOS Stream / Fedora
+sudo dnf install -y clang llvm bpftool libbpf-devel elfutils-libelf-devel \
+    zlib-devel pkgconf-pkg-config gcc gcc-c++ make
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
 make bpf                          # generate vmlinux.h, compile the three CO-RE objects
@@ -210,6 +215,14 @@ make check                        # formatting, static checks, unit tests
 
 # Run every object through the kernel verifier, leaving no runtime state
 skyline-speederd --config config/speeder.toml --validate-only --verify-bpf
+```
+
+On RHEL 9 and its clones, `libbpf-devel` lives in the **CRB** (codeready-builder)
+repository, which is disabled by default. Enable it first — Fedora is not
+affected, it carries `libbpf-devel` in the default repos:
+
+```bash
+sudo dnf -y install dnf-plugins-core && sudo dnf -y config-manager --set-enabled crb
 ```
 
 `make bpf` reads type information from this machine's `/sys/kernel/btf/vmlinux`. Use `make VMLINUX_BTF=<path> bpf` for another kernel's BTF, or `make PREBUILT_VMLINUX_H=<path> bpf` for a ready-made header.

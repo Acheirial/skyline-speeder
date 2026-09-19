@@ -86,16 +86,33 @@ main() {
     command -v tar  >/dev/null 2>&1 || NEED+=(tar)
     if [ "${#NEED[@]}" -gt 0 ]; then
         info "installing fetch prerequisites: ${NEED[*]}"
-        command -v apt-get >/dev/null 2>&1 \
-            || die "missing ${NEED[*]} and no apt-get to install them (Debian/Ubuntu only)"
-        # Same quiet style as install.sh: apt's and dpkg's chatter goes to a
-        # log that is only shown when something actually fails.
-        if ! { DEBIAN_FRONTEND=noninteractive apt-get update -qq \
-               && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Use-Pty=0 \
-                    "${NEED[@]}"; } >"$TMP/apt.log" 2>&1 </dev/null; then
-            cat "$TMP/apt.log" >&2
-            die "failed to install ${NEED[*]}"
+        # Match the host's own package manager rather than assuming Debian;
+        # curl/tar live in core packages on every distro, so this stays a
+        # one-line install per family. -y answers the confirmation prompt
+        # unattended and -q/-qq keeps the output to a couple of lines.
+        local PKG_MGR
+        if command -v apt-get >/dev/null 2>&1; then
+            PKG_MGR=apt-get
+        elif command -v dnf >/dev/null 2>&1; then
+            PKG_MGR=dnf
+        elif command -v yum >/dev/null 2>&1; then
+            PKG_MGR=yum
+        else
+            die "missing ${NEED[*]} and no apt-get/dnf/yum to install them (Debian/Ubuntu and RHEL/Rocky/Alma/CentOS/Fedora are supported)"
         fi
+        case "$PKG_MGR" in
+            apt-get)
+                # Same quiet style as install.sh: apt's and dpkg's chatter goes
+                # to a log that is only shown when something actually fails.
+                if ! { DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+                       && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Use-Pty=0 \
+                            "${NEED[@]}"; } >"$TMP/apt.log" 2>&1 </dev/null; then
+                    cat "$TMP/apt.log" >&2
+                    die "failed to install ${NEED[*]}"
+                fi ;;
+            dnf) dnf -y -q install "${NEED[@]}" || die "failed to install ${NEED[*]}" ;;
+            yum) yum -y -q install "${NEED[@]}" || die "failed to install ${NEED[*]}" ;;
+        esac
         ok "installed ${NEED[*]}"
     fi
 

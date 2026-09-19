@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Skyline Speeder -- one-click installer for Debian / Ubuntu.
+# Skyline Speeder -- one-click installer for Debian / Ubuntu and the RHEL family
+# (RHEL, Rocky, AlmaLinux, CentOS Stream, Fedora).
 #
 # Installs the build toolchain, compiles the three CO-RE BPF objects against
 # THIS machine's kernel BTF, builds the Rust control plane, installs the systemd
@@ -809,13 +810,33 @@ if [ "$MODE" = install ]; then
 fi
 
 # --- 1. distribution -------------------------------------------------------
+# /etc/os-release gives ID (e.g. "rocky"), ID_LIKE (e.g. "rhel centos fedora")
+# and VERSION_ID (e.g. "9"). ID_LIKE_ALL spans both fields: ID_LIKE is what
+# makes this work across the whole family without enumerating every clone --
+# RHEL sets ID_LIKE="rhel", the clones inherit "rhel centos fedora", Fedora
+# alone sets only "fedora" -- and ID covers a distro that left ID_LIKE empty.
 [ -r /etc/os-release ] || die "/etc/os-release missing; unsupported system"
 # shellcheck disable=SC1091
 . /etc/os-release
-case "${ID:-}:${ID_LIKE:-}" in
-    debian:*|ubuntu:*|*:*debian*|*:*ubuntu*) ok "distribution: ${PRETTY_NAME:-$ID}" ;;
-    *) die "this installer supports Debian/Ubuntu only (found ID=${ID:-unknown})" ;;
+ID_LIKE_ALL="${ID_LIKE:-} ${ID:-}"
+case "$ID_LIKE_ALL" in
+    *rhel*|*centos*|*fedora*|*rocky*|*almalinux*)
+        DISTRO_FAMILY=rhel
+        # dnf is present everywhere from RHEL 8 on; yum is the fallback on the
+        # odd system that lacks it. Both take the same arguments here.
+        if command -v dnf >/dev/null 2>&1; then PKG_MGR=dnf
+        elif command -v yum >/dev/null 2>&1; then PKG_MGR=yum
+        else die "found no dnf or yum on a RHEL-family system (found ID=${ID:-unknown})"; fi
+        ;;
+    *debian*|*ubuntu*)
+        DISTRO_FAMILY=debian
+        PKG_MGR=apt-get
+        ;;
+    *)
+        die "this installer supports Debian/Ubuntu and the RHEL family (RHEL, Rocky,
+   AlmaLinux, CentOS Stream, Fedora); found ID=${ID:-unknown}" ;;
 esac
+ok "distribution: ${PRETTY_NAME:-$ID} ($PKG_MGR)"
 
 # --- 2. kernel version -----------------------------------------------------
 # Hard ABI floor. skyline_cc hangs off tcp_congestion_ops.cong_control declared
@@ -860,15 +881,29 @@ log "before: tcp_congestion_control=$BEFORE_CC default_qdisc=$BEFORE_DQ egress: 
 [ -z "$CONF_SETTINGS" ] || log "set in /etc/sysctl.conf, not read at boot (key|value|file):" "$CONF_SETTINGS"
 
 # --- 5. packages -----------------------------------------------------------
-export DEBIAN_FRONTEND=noninteractive
-# iproute2 on both paths: skyline-speederd runs `tc` to put fq on the egress
-# interface, and the steps below use `ip` and `tc` to find and report it.
-if [ "$SOURCE" = prebuilt ]; then
-    # The whole point of --prebuilt: no compiler, no LLVM, no bpftool, no Rust.
-    # Only what it takes to fetch and unpack an archive.
-    PKGS=(curl ca-certificates tar iproute2)
+# iproute2 (iproute on the RHEL family) on both paths: skyline-speederd runs
+# `tc` to put fq on the egress interface, and the steps below use `ip` and `tc`
+# to find and report it.
+if [ "$DISTRO_FAMILY" = rhel ]; then
+    # el9 names differ from Debian for everything that is not autotools:
+    # libbpf-devel not libbpf-dev, elfutils-libelf-devel not libelf-dev (the
+    # latter is the Debian name and does not exist here), and the C++ compiler
+    # ships separately from gcc. pkgconf-pkg-config owns /usr/bin/pkg-config.
+    if [ "$SOURCE" = prebuilt ]; then
+        PKGS=(curl ca-certificates tar iproute)
+    else
+        PKGS=(clang llvm bpftool libbpf-devel elfutils-libelf-devel zlib-devel \
+              pkgconf-pkg-config gcc gcc-c++ make curl tar iproute)
+    fi
 else
-    PKGS=(build-essential pkg-config clang llvm libbpf-dev libelf-dev zlib1g-dev bpftool curl iproute2)
+    export DEBIAN_FRONTEND=noninteractive
+    if [ "$SOURCE" = prebuilt ]; then
+        # The whole point of --prebuilt: no compiler, no LLVM, no bpftool, no Rust.
+        # Only what it takes to fetch and unpack an archive.
+        PKGS=(curl ca-certificates tar iproute2)
+    else
+        PKGS=(build-essential pkg-config clang llvm libbpf-dev libelf-dev zlib1g-dev bpftool curl iproute2)
+    fi
 fi
 
 if [ "$MODE" = check ]; then
@@ -880,7 +915,7 @@ if [ "$MODE" = check ]; then
         ok "prebuilt install needs no build toolchain on this host"
     else
         MISSING=()
-        for c in clang llvm-config bpftool cargo; do
+        for c in clang bpftool gcc cargo; do
             command -v "$c" >/dev/null 2>&1 || MISSING+=("$c")
         done
         [ ${#MISSING[@]} -eq 0 ] && ok "toolchain present" || warn "missing: ${MISSING[*]}"
@@ -936,25 +971,60 @@ if systemctl is-active --quiet skyline-speederd.service 2>/dev/null; then
 fi
 
 step "Installing packages"
-# `-qq` silences apt but not dpkg, which still prints an unpack line per
-# package plus a "Reading database" progress bar. Dpkg::Use-Pty=0 stops the
-# progress redraw; the log keeps the detail for when something actually fails.
-# A fresh cloud VM is often still running unattended-upgrades: wait for the
-# dpkg lock instead of failing on it. confdef/confold answer a changed-conffile
-# prompt the way an operator almost always would -- keep their file -- since
-# nobody can answer it from behind a progress bar.
-APT_OPTS=(-y -qq -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=300
-          -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
-run apt-get "${APT_OPTS[@]}" update || die "apt-get update failed"
-run apt-get "${APT_OPTS[@]}" install "${PKGS[@]}" || die "failed to install build prerequisites"
+if [ "$DISTRO_FAMILY" = rhel ]; then
+    # On RHEL 9 and its clones libbpf-devel lives in the CRB (codeready-builder)
+    # repository, which is disabled by default; on Fedora it is in the default
+    # repos, so CRB is only touched on the non-Fedora members of the family.
+    # Enabling is best-effort: an older dnf without dnf-plugins-core, a system
+    # where CRB is already on, or a variant that names the repo differently all
+    # get a warning, and if the packages still install the install succeeds.
+    # Only the build set needs libbpf-devel; a --prebuilt install never needs
+    # it, so it never touches the system's repository configuration.
+    if [ "$SOURCE" = build ]; then
+        case "$ID_LIKE_ALL" in
+            *fedora*) : ;;
+            *)
+                info "enabling the CRB repository for libbpf-devel"
+                if "$PKG_MGR" -y install dnf-plugins-core >/dev/null 2>&1 \
+                && "$PKG_MGR" -y config-manager --set-enabled crb >/dev/null 2>&1; then
+                    ok "CRB enabled"
+                else
+                    warn "could not enable CRB (older dnf, missing plugin, or already enabled).
+   If the package install below fails, enable codeready-builder manually:
+   dnf -y install dnf-plugins-core && dnf -y config-manager --set-enabled crb"
+                fi
+                ;;
+        esac
+    fi
+
+    # -q still leaves a per-package line on dnf; -y keeps it non-interactive.
+    # Same log-and-dump-on-failure contract as the apt path.
+    DNF_LOG=$(mktemp)
+    dnf_quiet() { "$PKG_MGR" -y -q "$@" >>"$DNF_LOG" 2>&1; }
+    dnf_quiet install "${PKGS[@]}" \
+        || { cat "$DNF_LOG" >&2; die "failed to install prerequisites with $PKG_MGR"; }
+    rm -f "$DNF_LOG"
+else
+    # `-qq` silences apt but not dpkg, which still prints an unpack line per
+    # package plus a "Reading database" progress bar. Dpkg::Use-Pty=0 stops the
+    # progress redraw; the log keeps the detail for when something actually fails.
+    # A fresh cloud VM is often still running unattended-upgrades: wait for the
+    # dpkg lock instead of failing on it. confdef/confold answer a changed-conffile
+    # prompt the way an operator almost always would -- keep their file -- since
+    # nobody can answer it from behind a progress bar.
+    APT_OPTS=(-y -qq -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=300
+              -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+    run apt-get "${APT_OPTS[@]}" update || die "apt-get update failed"
+    run apt-get "${APT_OPTS[@]}" install "${PKGS[@]}" || die "failed to install build prerequisites"
+fi
 ok "prerequisites installed"
 
 # --- 6. Rust ---------------------------------------------------------------
 # Skipped entirely for a prebuilt install -- the binaries are already built.
-if [ "$SOURCE" = build ]; then
-step "Preparing the Rust toolchain"
 # rust-toolchain.toml pins the channel; rustup honours it automatically inside
 # the repo, so only the rustup installation itself is handled here.
+if [ "$SOURCE" = build ]; then
+step "Preparing the Rust toolchain"
 if ! command -v cargo >/dev/null 2>&1; then
     if [ -x "$HOME/.cargo/bin/cargo" ]; then
         PATH="$HOME/.cargo/bin:$PATH"

@@ -22,6 +22,13 @@ make check                        # cargo fmt --check + cargo check + unit tests
 make test                         # includes cargo test
 ```
 
+The project builds on both Debian/Ubuntu and the RHEL 9+ family (RHEL, Rocky,
+AlmaLinux, CentOS Stream, Fedora). On RHEL 9 and its clones, `libbpf-devel`
+lives in the CRB repository, which is disabled by default —
+`dnf -y install dnf-plugins-core && dnf -y config-manager --set-enabled crb`
+before installing the toolchain. CI builds the Rust and BPF targets on both
+Debian and `rockylinux:9`.
+
 `make bpf` reads type information from **this machine's** `/sys/kernel/btf/vmlinux`,
 so it must run on the target kernel, or be pointed at BTF explicitly with
 `make VMLINUX_BTF=<path> bpf`. `bpf/include/vmlinux.h` is a build artefact and is

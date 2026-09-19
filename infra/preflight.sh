@@ -56,7 +56,7 @@ check_bpftool() {
         printf 'ok      command %-24s %s\n' \
             "$bpftool_bin" "$(command -v "$bpftool_bin")"
     else
-        printf 'missing command %s (found on PATH but failed to run -- on Ubuntu this usually means the linux-tools package for `uname -r` is not installed; build a repo-local bpftool from the target kernel source and pass BPFTOOL=<path>)\n' \
+        printf 'missing command %s (found on PATH but failed to run -- on Ubuntu this usually means the linux-tools package for `uname -r` is not installed; on RHEL/Rocky/Alma/CentOS/Fedora it is the bpftool package, or build a repo-local bpftool from the target kernel source and pass BPFTOOL=<path>)\n' \
             "$bpftool_bin"
         FAILED=1
     fi
@@ -95,10 +95,13 @@ check_deb_package() {
     # under an unrelated name -- `command -v` cannot see them at all, and a
     # missing one only surfaces hours into a kernel build as an opaque
     # dpkg-buildpackage error. Debian/Ubuntu-specific by design; the
-    # documented formal workflow only targets Ubuntu guests/hosts.
+    # documented formal workflow only targets Ubuntu guests/hosts. On a
+    # RHEL-family host there is no dpkg-query and no .deb package set to
+    # verify against at all, so warn and skip rather than make a host
+    # with no .deb tooling hard-fail the preflight.
     local package_name=$1
     if ! command -v dpkg-query >/dev/null 2>&1; then
-        printf 'warning cannot verify package %s (dpkg-query unavailable)\n' \
+        printf 'warning cannot verify package %s (dpkg-query unavailable; package-level verification is a Debian/Ubuntu-only check for the bindeb-pkg kernel build path)\n' \
             "$package_name"
         return
     fi
@@ -111,13 +114,21 @@ check_deb_package() {
         FAILED=1
     fi
 }
-
 if [ "$MODE" = formal ] || [ "$MODE" = tcg-validation ]; then
     for command_name in qemu-system-x86_64 qemu-img cloud-localds iperf3 \
-        perf ethtool curl sha256sum taskset bc bison flex pahole \
-        dpkg-buildpackage fakeroot; do
+        perf ethtool curl sha256sum taskset bc bison flex pahole; do
         check_command "$command_name"
     done
+    # dpkg-buildpackage + fakeroot exist only to build the .deb kernel package
+    # used by the formal test bed. On a host without dpkg-query (RHEL family)
+    # they cannot be installed at all -- skip with a warning instead of
+    # failing, so preflight stays usable for the non-Debian parts there.
+    if command -v dpkg-query >/dev/null 2>&1; then
+        check_command dpkg-buildpackage
+        check_command fakeroot
+    else
+        echo "warning skipping dpkg-buildpackage/fakeroot check (dpkg-query unavailable -- the formal .deb kernel-build path is Debian/Ubuntu-only)"
+    fi
     for package_name in debhelper libdw-dev; do
         check_deb_package "$package_name"
     done

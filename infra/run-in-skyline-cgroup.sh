@@ -33,6 +33,16 @@ fi
 echo $$ > "$CGROUP/cgroup.procs"
 
 if [ -n "${SUDO_USER:-}" ]; then
-    exec runuser -u "$SUDO_USER" -- "$@"
+    # Prefer runuser (part of shadow-utils/util-linux on both Debian and
+    # RHEL families): it takes the argv array verbatim, so an argument
+    # containing spaces or shell metacharacters survives intact. Fall back
+    # to `su`, which is present even on minimal images where shadow-utils
+    # may not be: su has no array form, so each argument must be re-quoted
+    # (%q escapes what bash's own word splitting would otherwise undo) to
+    # keep the exact same argv reaching the command.
+    if command -v runuser >/dev/null 2>&1; then
+        exec runuser -u "$SUDO_USER" -- "$@"
+    fi
+    exec su - "$SUDO_USER" -c "$(printf '%q ' "$@")"
 fi
 exec "$@"

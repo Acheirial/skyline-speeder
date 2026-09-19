@@ -50,6 +50,20 @@ rustup override set 1.75.0
 因发行版而异。`iproute2` 是运行期依赖：`skyline-speederd` 用其中的 `tc` 维护出口
 网卡的根 qdisc，见第 7 节。）
 
+RHEL 系（RHEL 9+ / Rocky Linux / AlmaLinux / CentOS Stream / Fedora）：
+
+```bash
+sudo dnf install -y clang llvm bpftool libbpf-devel elfutils-libelf-devel \
+    zlib-devel pkgconf-pkg-config gcc gcc-c++ make
+```
+
+RHEL 9 及其克隆版上 `libbpf-devel` 位于 **CRB**（codeready-builder）仓库，该仓库
+默认未启用，需先开启；Fedora 不受影响，`libbpf-devel` 在其默认仓库中：
+
+```bash
+sudo dnf -y install dnf-plugins-core && sudo dnf -y config-manager --set-enabled crb
+```
+
 ```bash
 make bpf    # 生成 bpf/include/vmlinux.h 并编译三个 CO-RE BPF 对象
 cargo build --workspace --release

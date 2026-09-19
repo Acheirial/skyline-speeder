@@ -8,7 +8,7 @@
 
 [![License](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](LICENSE)
 [![Kernel](https://img.shields.io/badge/kernel-6.12%20LTS%2B-orange.svg)](#内核版本要求)
-[![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-red.svg)](install.sh)
+[![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu%20%7C%20RHEL%209%2B-red.svg)](install.sh)
 [![eBPF](https://img.shields.io/badge/eBPF-CO--RE%20struct__ops-green.svg)](bpf/)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-black.svg)](rust-toolchain.toml)
 
@@ -105,7 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/CYBERVERSE-Research/skyline-speeder
 curl -fsSL https://raw.githubusercontent.com/CYBERVERSE-Research/skyline-speeder/main/scripts/bootstrap.sh | sudo bash -s -- --prebuilt
 ```
 
-最小化镜像可能没有 `curl`（`apt-get install -y curl`）或 `sudo`（已经是 root 就去掉）。想先看过脚本再运行（**推荐**，因为它会改变这台机器上所有新建连接的拥塞控制）：
+最小化镜像可能没有 `curl`（Debian/Ubuntu 用 `apt-get install -y curl`，RHEL 9+/Rocky/Alma/CentOS Stream/Fedora 用 `dnf install -y curl`）或 `sudo`（已经是 root 就去掉）。想先看过脚本再运行（**推荐**，因为它会改变这台机器上所有新建连接的拥塞控制）：
 
 ```bash
 git clone https://github.com/CYBERVERSE-Research/skyline-speeder.git
@@ -178,7 +178,7 @@ sudo /opt/skyline-speeder/infra/run-in-skyline-cgroup.sh <你的服务启动命�
 
 ```
 skyline-speeder/
-├── install.sh                    一键安装（Debian/Ubuntu）
+├── install.sh                    一键安装（Debian/Ubuntu/RHEL 系）
 ├── scripts/bootstrap.sh          远程安装入口（curl | sudo bash）
 ├── bpf/
 │   ├── skyline_cc.bpf.c          struct_ops 拥塞控制，每个 ACK 执行
@@ -202,8 +202,13 @@ skyline-speeder/
 ## 从源码构建
 
 ```bash
+# Debian/Ubuntu
 sudo apt-get install -y build-essential pkg-config clang llvm \
     libbpf-dev libelf-dev zlib1g-dev bpftool
+
+# RHEL 9+ / Rocky / AlmaLinux / CentOS Stream / Fedora
+sudo dnf install -y clang llvm bpftool libbpf-devel elfutils-libelf-devel \
+    zlib-devel pkgconf-pkg-config gcc gcc-c++ make
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
 make bpf                          # 生成 vmlinux.h 并编译三个 CO-RE 对象
@@ -212,6 +217,13 @@ make check                        # 格式、静态检查与单元测试
 
 # 让每个对象过一遍内核验证器，不留下任何运行状态
 skyline-speederd --config config/speeder.toml --validate-only --verify-bpf
+```
+
+RHEL 9 及其衍生版上，`libbpf-devel` 位于 **CRB**（codeready-builder）仓库，该仓库
+默认未启用，需先开启；Fedora 不受影响，`libbpf-devel` 在其默认仓库中：
+
+```bash
+sudo dnf -y install dnf-plugins-core && sudo dnf -y config-manager --set-enabled crb
 ```
 
 `make bpf` 默认从本机 `/sys/kernel/btf/vmlinux` 读取类型信息；要用别的内核的 BTF，用 `make VMLINUX_BTF=<路径> bpf`；已有生成好的头，用 `make PREBUILT_VMLINUX_H=<路径> bpf`。

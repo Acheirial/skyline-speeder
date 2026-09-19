@@ -182,6 +182,26 @@ grep '^tc_interface' /etc/skyline-speeder/speeder.toml
 > enable unit 此前不是 active、且该主机应挂载 skyline_cc 的话，restart 后按第 5 节启动它。各版本的
 > 升级注意事项见 `CHANGELOG.md` 里对应的 *Upgrading from ...* 小节。
 
+**RHEL 系（RHEL 9+ / Rocky / AlmaLinux / CentOS Stream / Fedora）等价命令**——
+包名与 Debian 系不同：`libbpf-devel` 而非 `libbpf-dev`、`elfutils-libelf-devel`
+而非 `libelf-dev`（后者是 Debian 名，在 RHEL 上不存在）、C++ 编译器与 gcc 分离
+提供、`pkgconf-pkg-config` 提供 `/usr/bin/pkg-config`。`dnf` 从 RHEL 8 起全家族
+可用，无 `dnf` 的老系统回退 `yum`（参数相同）：
+
+```bash
+# 3.1R 工具链（RHEL 系）
+# RHEL 9 及其克隆版：libbpf-devel 在 CRB 仓库，默认未启用，先开 CRB
+# （Fedora 不需要这步，libbpf-devel 在默认仓库）
+dnf -y install dnf-plugins-core && dnf -y config-manager --set-enabled crb
+
+dnf -y install clang llvm bpftool libbpf-devel elfutils-libelf-devel \
+    zlib-devel pkgconf-pkg-config gcc gcc-c++ make curl tar
+```
+
+成功判据：上一条命令退出码为 0。若 CRB 启用失败（老版本 dnf 缺插件、仓库已启用、
+或某些改名的衍生版），安装器只告警而不中止——只要上面的包能装上，部署继续；
+装不上则按报错手工启用 codeready-builder 后重试。
+
 ---
 
 ## 4. 启动前验证（不留运行状态）

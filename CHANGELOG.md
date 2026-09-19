@@ -58,6 +58,16 @@ for anyone holding a prebuilt `.bpf.o`.
   more; set it in `/etc/sysctl.d` if the host relies on it.
 
 ### Added
+- RHEL-family support in `install.sh` and `scripts/bootstrap.sh`. The
+  installer reads `ID`/`ID_LIKE` from `/etc/os-release`, uses `dnf` (falling
+  back to `yum`), and installs the RHEL package names — `libbpf-devel` not
+  `libbpf-dev`, `elfutils-libelf-devel` not `libelf-dev`, `gcc-c++` separate
+  from `gcc`. On RHEL 9 and its clones it enables the CRB repository for
+  `libbpf-devel`; Fedora, which carries it in the default repos, is left
+  alone. `bootstrap.sh` installs `curl`/`tar` via `dnf`/`yum` when
+  `apt-get` is absent.
+- CI builds the Rust and BPF targets on `rockylinux:9` alongside the Debian
+  job.
 
 - **The guard: skyline-speederd keeps the host on skyline_cc and fq.**
   "One-click BBR" scripts write `tcp_congestion_control=bbr` and

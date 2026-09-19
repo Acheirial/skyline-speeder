@@ -5,6 +5,8 @@
 #
 #   CAN   compile the three CO-RE BPF objects, build and test the Rust control
 #         plane, lint the shell scripts, run the experiment-harness unit tests.
+#         Both Debian and RHEL families are exercised (Ubuntu 24.04 and Rocky
+#         Linux 9), so "it builds" is not a distro accident.
 #   CANNOT load any BPF object. GitHub runners do not run a 6.12+ kernel and the
 #         four-argument `cong_control` signature skyline_cc depends on does not
 #         exist below 6.10, so the verifier would reject it for reasons that say
@@ -58,6 +60,49 @@ jobs:
 
       - name: Unit tests
         run: cargo test --workspace --locked
+
+  # RHEL-family mirror of the `rust` job. Same toolchain (rust-toolchain.toml
+  # is honoured by dtolnay/rust-toolchain regardless of distro), same cargo
+  # invocations, different packaging. Exists to prove the control plane and
+  # its build dependencies are not Debian accidents.
+  rust-rhel:
+    name: Rust on Rocky Linux 9 (fmt, check, test)
+    runs-on: ubuntu-24.04
+    container: rockylinux:9
+    steps:
+      - uses: actions/checkout@v4
+
+      # On RHEL 9 clones libbpf-devel lives in CRB, which is disabled by
+      # default. `config-manager --set-enabled` needs dnf-plugins-core, which
+      # is not installed in the base image either. Tolerate the enable step
+      # failing: on Fedora-derived images where the repo is already on, the
+      # whole pair is a no-op, and a missing libbpf-devel surfaces at the
+      # install step below with a clear error.
+      - name: Enable CRB and install build dependencies
+        run: |
+          set -euo pipefail
+          dnf -y install dnf-plugins-core
+          dnf -y config-manager --set-enabled crb || true
+          dnf -y install clang llvm bpftool libbpf-devel elfutils-libelf-devel \
+            zlib-devel pkgconf-pkg-config gcc gcc-c++ make curl tar
+
+      # dtolnay/rust-toolchain reads rust-toolchain.toml, which pins 1.75.0.
+      # Distro rust is newer (1.9x) and must NOT be used: the toolchain file
+      # is part of the build contract.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Show toolchain
+        run: cargo --version && rustc --version && cargo fmt --version
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Static check
+        run: cargo check --workspace --all-targets
+
+      - name: Unit tests
+        run: cargo test --workspace
 
   bpf:
     name: BPF (CO-RE compile only)
@@ -148,15 +193,74 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # RHEL-family mirror of the `bpf` job: same compile-only contract, no load,
+  # no artifact upload (the ubuntu job already ships the objects).
+  bpf-rhel:
+    name: BPF on Rocky Linux 9 (CO-RE compile only)
+    runs-on: ubuntu-24.04
+    container: rockylinux:9
+    steps:
+      - uses: actions/checkout@v4
+
+      # clang and the libbpf/libelf/zlib headers come from the default repos;
+      # libbpf-devel (and bpftool's libbpf linkage) need CRB enabled first.
+      - name: Enable CRB and install clang, libbpf, bpftool
+        run: |
+          set -euo pipefail
+          dnf -y install dnf-plugins-core
+          dnf -y config-manager --set-enabled crb || true
+          dnf -y install clang llvm bpftool libbpf-devel elfutils-libelf-devel \
+            elfutils zlib-devel pkgconf-pkg-config gcc gcc-c++ make curl tar
+
+      # The runner host kernel BTF is visible from inside the container
+      # because /sys is bind-mounted, so vmlinux.h can be dumped exactly as
+      # on ubuntu. Absent BTF is still a hard failure, for the same reason.
+      - name: Compile CO-RE objects
+        run: |
+          set -euo pipefail
+          if [ ! -r /sys/kernel/btf/vmlinux ]; then
+            echo "::error::/sys/kernel/btf/vmlinux is absent on this runner; CO-RE objects cannot be compiled"
+            exit 1
+          fi
+          make bpf BPFTOOL="$(command -v bpftool)"
+          ls -l build/bpf/
+
+      # Same .BTF.ext assertion as the ubuntu job: without it the object
+      # carries no CO-RE relocations and is not portable.
+      - name: Assert CO-RE relocations are present
+        run: |
+          set -euo pipefail
+          for object in build/bpf/*.bpf.o; do
+            if readelf -S "$object" | grep -q '\.BTF\.ext'; then
+              echo "ok   $object carries .BTF.ext"
+            else
+              echo "::error::$object has no .BTF.ext section; it is not CO-RE relocatable"
+              exit 1
+            fi
+          done
+
   shell:
     name: Shell (shellcheck, syntax)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-
+      # The upstream static binary is used instead of distro packaging so a
+      # shellcheck upgrade is a version bump here, not a distro release. It is
+      # fetched over TLS from the release CDN and pinned by sha256.
       - name: Install shellcheck
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          set -euo pipefail
+          url="https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/shellcheck.tar.xz "$url"
+          echo "${SHELLCHECK_SHA256}  /tmp/shellcheck.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xJf /tmp/shellcheck.tar.xz -C "$HOME/.local/bin" \
+            --strip-components=1 shellcheck-${SHELLCHECK_VERSION}/shellcheck
+          chmod +x "$HOME/.local/bin/shellcheck"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          shellcheck --version
       # Severity warning and above. Repository-wide exclusions, with the reason
       # each one is a false positive here, live in .shellcheckrc.
       - name: shellcheck
