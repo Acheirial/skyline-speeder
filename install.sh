@@ -52,12 +52,12 @@ MODE=install
 ENABLE=1
 SOURCE=build          # build | prebuilt
 RELEASE_TAG=          # empty means "latest"
-REPO_SLUG=${SKYLINE_REPO:-CYBERVERSE-Research/skyline-speeder}
+REPO_SLUG=${SKYLINE_REPO:-Acheirial/skyline-speeder}
 case "${SKYLINE_VERBOSE:-0}" in 1|yes|true) VERBOSE=1 ;; *) VERBOSE=0 ;; esac
 LOG=/var/log/skyline-speeder-install.log
 CFG=/etc/skyline-speeder/speeder.toml
 STATE=/etc/skyline-speeder/pre-install-state
-GUIDE_URL=https://github.com/CYBERVERSE-Research/skyline-speeder/blob/main/docs/usage.md
+GUIDE_URL=https://github.com/Acheirial/skyline-speeder/blob/main/docs/usage.md
 
 # --- output ----------------------------------------------------------------
 # An install used to scroll a screenful of apt, rustup, make and cargo output

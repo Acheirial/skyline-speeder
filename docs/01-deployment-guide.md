@@ -88,7 +88,7 @@ cargo build --workspace --release
 | 手动 | `sudo infra/install-guest.sh --confirm-install`，再按第 5–7 节 | 需要逐步控制 |
 
 没有仓库 checkout 的机器用 `scripts/bootstrap.sh`：
-`curl -fsSL https://raw.githubusercontent.com/CYBERVERSE-Research/skyline-speeder/main/scripts/bootstrap.sh | sudo bash`，
+`curl -fsSL https://raw.githubusercontent.com/Acheirial/skyline-speeder/main/scripts/bootstrap.sh | sudo bash`，
 它把源码树放到 `/usr/local/src/skyline-speeder` 后交给 `install.sh`，其余参数原样转交
 （例如 `... | sudo bash -s -- --prebuilt`）。它运行的 `install.sh` 来自 `--ref`（默认
 `main`），不是最新 release。

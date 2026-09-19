@@ -99,16 +99,16 @@ RTT 70-73 ms、丢包 10%-30%，测于晚高峰。skyline_cc 使用 0.1.0 时随
 
 ```bash
 # 在本机从源码构建
-curl -fsSL https://raw.githubusercontent.com/CYBERVERSE-Research/skyline-speeder/main/scripts/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Acheirial/skyline-speeder/main/scripts/bootstrap.sh | sudo bash
 
 # 或者安装已发布的版本，不需要编译工具链
-curl -fsSL https://raw.githubusercontent.com/CYBERVERSE-Research/skyline-speeder/main/scripts/bootstrap.sh | sudo bash -s -- --prebuilt
+curl -fsSL https://raw.githubusercontent.com/Acheirial/skyline-speeder/main/scripts/bootstrap.sh | sudo bash -s -- --prebuilt
 ```
 
 最小化镜像可能没有 `curl`（Debian/Ubuntu 用 `apt-get install -y curl`，RHEL 9+/Rocky/Alma/CentOS Stream/Fedora 用 `dnf install -y curl`）或 `sudo`（已经是 root 就去掉）。想先看过脚本再运行（**推荐**，因为它会改变这台机器上所有新建连接的拥塞控制）：
 
 ```bash
-git clone https://github.com/CYBERVERSE-Research/skyline-speeder.git
+git clone https://github.com/Acheirial/skyline-speeder.git
 cd skyline-speeder
 sudo ./install.sh              # 从源码构建
 sudo ./install.sh --prebuilt   # 安装已发布的产物，不需要编译工具链

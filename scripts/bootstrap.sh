@@ -2,7 +2,7 @@
 #
 # Skyline Speeder -- remote bootstrap.
 #
-#   curl -fsSL https://raw.githubusercontent.com/CYBERVERSE-Research/skyline-speeder/main/scripts/bootstrap.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/Acheirial/skyline-speeder/main/scripts/bootstrap.sh | sudo bash
 #
 # Fetches the source tree to a stable location and hands off to install.sh.
 # By default install.sh then builds from source on this host. Forwarding
@@ -18,7 +18,7 @@
 # runs. Do not "simplify" this into top-level statements.
 #
 #   --ref <git-ref>     tag, branch or commit to install (default: main)
-#   --repo <owner/name> source repository (default: CYBERVERSE-Research/skyline-speeder)
+#   --repo <owner/name> source repository (default: Acheirial/skyline-speeder)
 #   --src-dir <path>    where the tree lands (default: /usr/local/src/skyline-speeder)
 #
 # Any other argument is forwarded to install.sh verbatim:
@@ -36,7 +36,7 @@ set -euo pipefail
 export LC_ALL=C.UTF-8 LANG=C.UTF-8 LANGUAGE=
 
 main() {
-    local REPO="${SKYLINE_REPO:-CYBERVERSE-Research/skyline-speeder}"
+    local REPO="${SKYLINE_REPO:-Acheirial/skyline-speeder}"
     local REF="${SKYLINE_REF:-main}"
     local SRC_DIR="${SKYLINE_SRC_DIR:-/usr/local/src/skyline-speeder}"
     local -a FORWARD=()

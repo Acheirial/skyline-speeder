@@ -549,6 +549,6 @@ rather than as fixes to a version nobody could have installed.
   socket file permissions. Multi-tenant hosts need additional access control.
 - The experiment harness requires **Python 3.11 or newer** (`tomllib`).
 
-[Unreleased]: https://github.com/CYBERVERSE-Research/skyline-speeder/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/CYBERVERSE-Research/skyline-speeder/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/CYBERVERSE-Research/skyline-speeder/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Acheirial/skyline-speeder/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Acheirial/skyline-speeder/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Acheirial/skyline-speeder/releases/tag/v0.1.0

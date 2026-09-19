@@ -97,16 +97,16 @@ Verified: `6.12.101`, `6.18.42` and `7.1.6` pass, including IPv4/IPv6 data-path 
 
 ```bash
 # Build from source on this host
-curl -fsSL https://raw.githubusercontent.com/CYBERVERSE-Research/skyline-speeder/main/scripts/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Acheirial/skyline-speeder/main/scripts/bootstrap.sh | sudo bash
 
 # Or install the published release, no build toolchain
-curl -fsSL https://raw.githubusercontent.com/CYBERVERSE-Research/skyline-speeder/main/scripts/bootstrap.sh | sudo bash -s -- --prebuilt
+curl -fsSL https://raw.githubusercontent.com/Acheirial/skyline-speeder/main/scripts/bootstrap.sh | sudo bash -s -- --prebuilt
 ```
 
 A minimal image may lack `curl` (`apt-get install -y curl`, or `dnf install -y curl` on RHEL 9+/Rocky/Alma/CentOS Stream/Fedora) or `sudo` (drop it if you are root). To read the scripts before running them, which is **recommended** since this changes the congestion control of every new connection on the machine:
 
 ```bash
-git clone https://github.com/CYBERVERSE-Research/skyline-speeder.git
+git clone https://github.com/Acheirial/skyline-speeder.git
 cd skyline-speeder
 sudo ./install.sh              # build from source
 sudo ./install.sh --prebuilt   # published release artifacts, no toolchain
