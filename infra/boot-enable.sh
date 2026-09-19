@@ -34,22 +34,16 @@ while [ ! -S "$SOCKET" ]; do
     sleep 1
 done
 
-# The machine can already have skyline_cc registered without the default
-# pointing at it: an ungraceful daemon exit (SIGKILL on a service timeout,
-# a crash, a hard reset) leaves the struct_ops attached, since the Drop
-# impl that unregisters it never ran -- and the daemon does not pin it, so
-# nothing else cleans it up either. That stale registration is exactly
-# what makes the next `ssctl enable` fail with EEXIST, which left this
-# service in 'failed' and the host silently back on the fallback. It is
-# not an error state: a registered-but-not-default algorithm affects no
-# flow, so the goal is just to get the default onto skyline_cc.
+# `ssctl enable` is idempotent, in both halves: the daemon skips the
+# struct_ops attach when skyline_cc is already registered (an ungraceful
+# exit leaves it attached, since the Drop impl that unregisters it never
+# ran) and skips the fallback baseline write in that same state. So this
+# needs no registration check of its own -- an "is it already attached"
+# test here is not just redundant, it is wrong: registered is not the
+# same as the default, and it is the default that moves new connections.
 AVAILABLE=$(cat /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null || echo "")
-case " $AVAILABLE " in
-    *" skyline_cc "*) ;;
-    *)
-        /usr/local/bin/ssctl enable >/dev/null
-        ;;
-esac
+echo "available congestion controls: $AVAILABLE"
+/usr/local/bin/ssctl enable
 
 # Read the sysctl back rather than trusting the exit status: this is the line
 # that would catch `ssctl enable` succeeding while the default silently stayed
